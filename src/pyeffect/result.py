@@ -477,13 +477,18 @@ def attempt(
 ) -> Result[_T, Any]:
     """Run ``fn`` and capture its failure as a value.
 
-    Only ``Exception`` is captured — ``KeyboardInterrupt`` and
-    ``SystemExit`` are bugs/interrupts and must propagate (fail fast).
-    Without a custom ``catch``, the failure is wrapped in
+    Only ``Exception`` is captured — ``KeyboardInterrupt``,
+    ``SystemExit`` and :class:`~pyeffect.panic.Panic` are bugs and
+    interrupts and must propagate (fail fast); a defect is never converted
+    into an ``Err``. Without a custom ``catch``, the failure is wrapped in
     :class:`~pyeffect.tagged.UnhandledException` (preserving ``.cause``).
     """
     try:
         return Ok(fn())
+    except Panic:
+        # A defect is a bug, not an expected failure: never fold a Panic
+        # into an Err (see pyeffect.panic). Let it propagate.
+        raise
     except Exception as exc:  # noqa: BLE001 -- the boundary contract: capture every Exception
         return Err(catch(exc))
 
@@ -524,8 +529,12 @@ def traverse[T, U, E](
         result = f(value)
         if isinstance(result, Ok):
             successes.append(result.value)
-        else:
+            continue
+        if isinstance(result, Err):
             return result
+        raise Panic(
+            f"traverse expected a Result from its callback, got {type(result).__name__}"
+        )
     return Ok(successes)
 
 
@@ -550,6 +559,8 @@ def flatten[T, E](result: Result[Result[T, E], E]) -> Result[T, E]:
             return inner
         case Err(_):
             return result
+        case _:
+            raise Panic(f"flatten expected a Result, got {type(result).__name__}")
 
 
 def transpose[T, E](result: Result[Option[T], E]) -> Option[Result[T, E]]:
@@ -573,10 +584,16 @@ def transpose[T, E](result: Result[Option[T], E]) -> Option[Result[T, E]]:
         # generics cannot widen it back to the union once ``isinstance`` has
         # narrowed it — so re-assert the union type for ``Some``'s slot.
         return Some(cast(Result[T, E], result))
-    opt = result.value  # Option[T]
-    if isinstance(opt, Some):
-        return Some(cast(Result[T, E], Ok(opt.value)))
-    return Nothing()
+    if isinstance(result, Ok):
+        opt = result.value  # Option[T]
+        if isinstance(opt, Some):
+            return Some(cast(Result[T, E], Ok(opt.value)))
+        if isinstance(opt, Nothing):
+            return Nothing()
+        raise Panic(
+            f"transpose expected an Ok to carry an Option, got {type(opt).__name__}"
+        )
+    raise Panic(f"transpose expected a Result, got {type(result).__name__}")
 
 
 def recover[T, U, E, F](
@@ -600,6 +617,8 @@ def recover[T, U, E, F](
             return cast(Result[T | U, F], result)
         case Err():
             return cast(Result[T | U, F], f(result.error))
+        case _:
+            raise Panic(f"recover expected a Result, got {type(result).__name__}")
 
 
 def partition[T, E](results: Iterable[Result[T, E]]) -> tuple[list[T], list[E]]:
@@ -622,4 +641,8 @@ def partition[T, E](results: Iterable[Result[T, E]]) -> tuple[list[T], list[E]]:
                 values.append(result.value)
             case Err():
                 errors.append(result.error)
+            case _:
+                # A non-Result element is a caller bug: panic instead of
+                # silently dropping it from both lists.
+                raise Panic(f"partition expected a Result, got {type(result).__name__}")
     return values, errors

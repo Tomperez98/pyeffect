@@ -42,6 +42,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator
 from typing import Any, TypeVar, overload
 
 from pyeffect.do import _ShortCircuit
+from pyeffect.panic import Panic
 from pyeffect.result import Err, ErrorContext, Ok, Result, attempt
 from pyeffect.result import recover as recover_result
 from pyeffect.retry import Policy
@@ -104,8 +105,9 @@ class Effect[T, E]:
 
         The exception boundary for effects: :func:`pyeffect.result.attempt`
         deferred until ``run``/``run_result``. Only ``Exception`` is
-        captured — ``KeyboardInterrupt`` and ``SystemExit`` are
-        bugs/interrupts and must propagate (fail fast).
+        captured — ``KeyboardInterrupt``, ``SystemExit`` and
+        :class:`~pyeffect.panic.Panic` are bugs and interrupts and must
+        propagate (fail fast).
         """
 
         def thunk() -> Result[_AttemptT, Any]:
@@ -153,7 +155,11 @@ class Effect[T, E]:
             outer = self._thunk()
             if isinstance(outer, Ok):
                 return outer.value.run_result()
-            return outer
+            if isinstance(outer, Err):
+                return outer
+            raise Panic(
+                f"effect thunk returned {type(outer).__name__}, expected a Result"
+            )
 
         return Effect(thunk)
 
@@ -171,8 +177,16 @@ class Effect[T, E]:
                 second = other._thunk()
                 if isinstance(second, Ok):
                     return Ok((first.value, second.value))
-                return second
-            return first
+                if isinstance(second, Err):
+                    return second
+                raise Panic(
+                    f"effect thunk returned {type(second).__name__}, expected a Result"
+                )
+            if isinstance(first, Err):
+                return first
+            raise Panic(
+                f"effect thunk returned {type(first).__name__}, expected a Result"
+            )
 
         return Effect(thunk)
 
@@ -188,8 +202,16 @@ class Effect[T, E]:
                 second = other._thunk()
                 if isinstance(second, Ok):
                     return Ok(f(first.value, second.value))
-                return second
-            return first
+                if isinstance(second, Err):
+                    return second
+                raise Panic(
+                    f"effect thunk returned {type(second).__name__}, expected a Result"
+                )
+            if isinstance(first, Err):
+                return first
+            raise Panic(
+                f"effect thunk returned {type(first).__name__}, expected a Result"
+            )
 
         return Effect(thunk)
 
@@ -305,8 +327,13 @@ def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
             result = effect.run_result()
             if isinstance(result, Ok):
                 values.append(result.value)
-            else:
+                continue
+            if isinstance(result, Err):
                 return result
+            raise Panic(
+                f"sequence: an effect returned {type(result).__name__}, "
+                f"expected a Result"
+            )
         return Ok(values)
 
     return Effect(thunk)
@@ -321,7 +348,8 @@ def do_effect[T, E](
     resulting effect is re-runnable: every ``run``/``run_result``
     re-invokes ``build`` and re-executes each step. Each
     ``for ... in effect`` clause runs one effect; the first expression is
-    the final effect::
+    the final effect. A builder that yields no effect or more than one is a
+    defect and panics when the effect runs::
 
         >>> from pyeffect import Effect
         >>> from pyeffect.effect import do_effect
@@ -332,9 +360,21 @@ def do_effect[T, E](
     """
 
     def thunk() -> Result[T, E]:
+        generator = build()
         try:
-            return next(build()).run_result()
+            effect = next(generator)
         except _ShortCircuit as short:
             return short.result
+        except StopIteration:
+            raise Panic("do_effect: the builder yielded no effect") from None
+        try:
+            next(generator)
+        except StopIteration:
+            return effect.run_result()
+        except _ShortCircuit:
+            raise Panic(
+                "do_effect: the builder must yield exactly one effect"
+            ) from None
+        raise Panic("do_effect: the builder must yield exactly one effect")
 
     return Effect(thunk)

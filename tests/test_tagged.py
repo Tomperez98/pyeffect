@@ -38,6 +38,11 @@ def test_tag_defaults_to_class_name() -> None:
     assert Unspecified().tag == "Unspecified"
 
 
+def test_base_tagged_error_has_a_default_tag() -> None:
+    # The base class carries its own tag, so direct instances are usable.
+    assert TaggedError("x").tag == "TaggedError"
+
+
 def test_is_a_real_exception() -> None:
     err = UserNotFound("u")
     assert isinstance(err, Exception)

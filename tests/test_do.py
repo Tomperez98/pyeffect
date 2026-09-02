@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+
+import pytest
+
 from pyeffect.do import do
 from pyeffect.effect import Effect, do_effect
 from pyeffect.option import Nothing, Some
+from pyeffect.panic import Panic
 from pyeffect.result import Err, Ok, Result
 
 
@@ -58,6 +63,21 @@ def test_do_option_short_circuits_on_nothing() -> None:
     assert result == Nothing()
 
 
+def test_do_rejects_zero_yields() -> None:
+    with pytest.raises(Panic):
+        do(Ok(x) for x in Ok(1) if False)
+
+
+def _two_results() -> Generator[Result[int, str], None, None]:
+    yield Ok(1)
+    yield Ok(2)
+
+
+def test_do_rejects_multiple_yields() -> None:
+    with pytest.raises(Panic):
+        do(_two_results())
+
+
 def test_do_effect_is_lazy() -> None:
     calls: list[str] = []
 
@@ -89,6 +109,23 @@ def test_do_effect_short_circuits() -> None:
         lambda: (Effect.success("never") for _ in Effect.failure("nope"))
     )
     assert effect.run_result() == Err("nope")
+
+
+def _two_effects() -> Generator[Effect[int, str], None, None]:
+    yield Effect.success(1)
+    yield Effect.success(2)
+
+
+def test_do_effect_rejects_multiple_yields() -> None:
+    effect = do_effect(lambda: _two_effects())
+    with pytest.raises(Panic):
+        effect.run()
+
+
+def test_do_effect_rejects_zero_yields() -> None:
+    effect = do_effect(lambda: (Effect.success(x) for x in Effect.success(1) if False))
+    with pytest.raises(Panic):
+        effect.run()
 
 
 def test_public_exports() -> None:

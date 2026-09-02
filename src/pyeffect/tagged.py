@@ -37,10 +37,11 @@ class TaggedError(Exception):
     Subclasses declare the tag with a keyword argument
     (``class UserNotFound(TaggedError, tag="UserNotFound")``); when omitted
     it defaults to the class name. The tag lives on the class, so every
-    instance of a subclass shares it.
+    instance of a subclass shares it; the base class itself carries
+    ``"TaggedError"`` so direct instances are usable.
     """
 
-    tag: str
+    tag: str = "TaggedError"
 
     def __init_subclass__(cls, *, tag: str | None = None, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

@@ -1,0 +1,16 @@
+[project]
+name = "pyeffect-checkout"
+version = "0.1.0"
+description = "Runnable checkout pipeline demo: Result/Option/do, retry, Effect, TaggedError, Codec, Panic boundary"
+readme = "README.md"
+requires-python = ">=3.12"
+# pyeffect is the only dependency and it has none of its own.
+dependencies = ["pyeffect>=0.2.0"]
+
+# This example is a member of the repository-wide uv workspace (see the
+# root pyproject.toml), so pyeffect resolves to the workspace member — the
+# checked-out source — instead of PyPI. To ship the example as a standalone
+# app against a published release, remove this table, move this folder out
+# of examples/, and run `uv lock` again.
+[tool.uv.sources]
+pyeffect = { workspace = true }

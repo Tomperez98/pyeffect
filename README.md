@@ -262,10 +262,24 @@ generics, documented in the module docstrings:
 - **Fixed arity ceilings** — `pipe` / `compose` type-check up to ten
   functions, `curry` up to five; the runtimes accept more.
 
+## Examples in this repository
+
+Runnable applications live in [`examples/`](examples/) — each one is its own
+uv project and a member of this repository's uv workspace, so it links the
+checked-out source and shares the repo's lockfile and virtualenv:
+
+```bash
+uv run python examples/checkout/main.py   # a checkout pipeline: Result/Option/do,
+                                          # Effect, retry, tagged errors, Codec,
+                                          # and the Panic defect boundary
+```
+
+See [`examples/`](examples/) for the full list and how to add an example.
+
 ## Development
 
 ```bash
 uv run pytest      # runtime + doctest tests
-uv run ty check src tests   # typing contract; also gates the tests/typing/ fixtures
-uv run ruff check src tests
+uv run ty check    # typing contract (src, tests, and examples/)
+uv run ruff check  # lint (src, tests, and examples/)
 ```

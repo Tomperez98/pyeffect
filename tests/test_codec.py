@@ -57,6 +57,21 @@ def test_codec_roundtrip() -> None:
     assert codec.deserialize({"status": "error", "error": "boom"}) == Err("boom")
 
 
+def test_codec_deserialize_rejects_missing_payload_keys() -> None:
+    # A status without its payload key is a malformed envelope — an
+    # expected wire failure that must not reach the payload decoders.
+    codec = _make_codec(
+        lambda n: str(n),
+        lambda e: e,
+        lambda w: Ok(int(str(w))),
+        lambda w: Ok(w),
+    )
+    for malformed in ({"status": "ok"}, {"status": "error"}):
+        result = codec.deserialize(malformed)
+        assert isinstance(result, Err)
+        assert isinstance(result.error, ResultDeserializationError)
+
+
 def test_codec_serialize_catches_encoder_defects() -> None:
     def boom(x: int) -> object:
         raise ValueError("bad")
@@ -83,6 +98,38 @@ def test_codec_serialize_unsafe_panics() -> None:
         lambda w: Ok(w),
     )
     with pytest.raises(Panic):
+        codec.serialize_unsafe(Ok(5))
+
+
+def test_codec_serialize_propagates_encoder_panics() -> None:
+    # An encoder raising a Panic is a defect, not a wire failure: it must
+    # propagate unchanged instead of becoming a ResultSerializationError.
+    def boom(x: object) -> object:
+        raise Panic("encoder defect")
+
+    codec = _make_codec(
+        boom,
+        boom,
+        lambda w: Ok(w),
+        lambda w: Ok(w),
+    )
+    with pytest.raises(Panic, match="encoder defect"):
+        codec.serialize(Ok(5))
+    with pytest.raises(Panic, match="encoder defect"):
+        codec.serialize(Err("boom"))
+
+
+def test_codec_serialize_unsafe_propagates_encoder_panics() -> None:
+    def boom(x: object) -> object:
+        raise Panic("encoder defect")
+
+    codec = _make_codec(
+        boom,
+        lambda e: e,
+        lambda w: Ok(w),
+        lambda w: Ok(w),
+    )
+    with pytest.raises(Panic, match="encoder defect"):
         codec.serialize_unsafe(Ok(5))
 
 

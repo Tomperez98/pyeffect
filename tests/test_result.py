@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -157,6 +158,27 @@ def test_attempt_lets_base_exceptions_propagate() -> None:
         attempt(lambda: (_ for _ in ()).throw(SystemExit("stop")))
 
 
+def test_attempt_propagates_panics() -> None:
+    # A defect is a bug, not an expected failure: attempt must never fold
+    # a Panic (such as unwrap() on an Err) into an Err.
+    with pytest.raises(UnwrapError):
+        attempt(lambda: Err("boom").unwrap())
+
+
+def test_attempt_propagates_panics_with_custom_catch() -> None:
+    with pytest.raises(Panic):
+        attempt(lambda: Err("boom").unwrap(), catch=lambda e: "caught")
+
+
+def test_guard_propagates_panics() -> None:
+    def buggy() -> int:
+        return Err("boom").unwrap()
+
+    guarded = guard(buggy)
+    with pytest.raises(UnwrapError):
+        guarded()
+
+
 def test_guard_decorated_success() -> None:
     guarded = guard(add_one)
     assert guarded(5) == Ok(6)
@@ -281,6 +303,14 @@ def test_traverse_accepts_generators() -> None:
     assert traverse(lambda x: Ok(x), (x for x in [1, 2])) == Ok([1, 2])
 
 
+def test_traverse_rejects_non_result_callback_returns() -> None:
+    def broken(x: int) -> Result[int, str]:
+        return cast(Result[int, str], 5)
+
+    with pytest.raises(Panic):
+        traverse(broken, [1])
+
+
 def test_context_passes_ok_through() -> None:
     assert Ok(5).context("while parsing") == Ok(5)
 
@@ -347,6 +377,11 @@ def test_flatten_collapses_nested_result() -> None:
     assert flatten(passthrough) == Err("boom")
 
 
+def test_flatten_rejects_non_results() -> None:
+    with pytest.raises(Panic):
+        flatten(cast(Result[Result[int, str], str], 5))
+
+
 def test_transpose_swaps_layers() -> None:
     result_ok: Result[Option[int], str] = Ok(Some(1))
     assert transpose(result_ok) == Some(Ok(1))
@@ -354,6 +389,16 @@ def test_transpose_swaps_layers() -> None:
     assert transpose(result_none) == Nothing()
     result_err: Result[Option[int], str] = Err("boom")
     assert transpose(result_err) == Some(Err("boom"))
+
+
+def test_transpose_rejects_non_results() -> None:
+    with pytest.raises(Panic):
+        transpose(cast(Result[Option[int], str], 5))
+
+
+def test_transpose_rejects_ok_with_non_option_payload() -> None:
+    with pytest.raises(Panic):
+        transpose(cast(Result[Option[int], str], Ok(5)))
 
 
 def test_unwrap_error_exposes_context() -> None:
@@ -385,6 +430,11 @@ def test_recover_keeps_error_on_err_recovery() -> None:
     result: Result[int, str] = Err("boom")
     recovered = recover(result, lambda e: Err(e.upper()))
     assert recovered == Err("BOOM")
+
+
+def test_recover_rejects_non_results() -> None:
+    with pytest.raises(Panic):
+        recover(cast(Result[int, str], 5), lambda e: Ok(0))
 
 
 def test_status_discriminant() -> None:

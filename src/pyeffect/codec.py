@@ -28,8 +28,12 @@ __all__ = [
     "from_dict",
 ]
 
-_STATUS_OK = "ok"
-_STATUS_ERROR = "error"
+# The wire discriminator is owned by the variants themselves
+# (``Ok.status``/``Err.status``) — round-trips silently break if this
+# copy drifts, so alias the class attributes instead of duplicating
+# the literals.
+_STATUS_OK = Ok.status
+_STATUS_ERROR = Err.status
 
 
 class ResultSerializationError(TaggedError, tag="ResultSerializationError"):
@@ -89,12 +93,18 @@ class Codec[T, E]:
     def serialize(
         self, result: Result[T, E]
     ) -> Result[dict[str, object], ResultSerializationError]:
-        """Encode ``result`` into an envelope, or return a serialization error."""
+        """Encode ``result`` into an envelope, or return a serialization error.
+
+        An encoder that raises :class:`~pyeffect.panic.Panic` is a defect,
+        not a wire failure — it propagates instead of becoming an ``Err``.
+        """
 
         match result:
             case Ok(value):
                 try:
                     return Ok({"status": _STATUS_OK, "value": self.encode_ok(value)})
+                except Panic:
+                    raise
                 except Exception:  # noqa: BLE001
                     return Err(ResultSerializationError(value))
             case Err(error):
@@ -102,6 +112,8 @@ class Codec[T, E]:
                     return Ok(
                         {"status": _STATUS_ERROR, "error": self.encode_err(error)}
                     )
+                except Panic:
+                    raise
                 except Exception:  # noqa: BLE001
                     return Err(ResultSerializationError(error))
 
@@ -115,17 +127,26 @@ class Codec[T, E]:
                 raise Panic("serialization failed", cause=error)
 
     def deserialize(self, data: object) -> Result[T, E | ResultDeserializationError]:
-        """Decode an envelope, returning the domain Result or a deserialization error."""
+        """Decode an envelope, returning the domain Result or a deserialization error.
+
+        A malformed envelope — non-dict, unknown status, or a status whose
+        payload key is missing — is an expected wire failure and returns an
+        ``Err``; it never reaches the payload decoders.
+        """
 
         if not isinstance(data, dict):
             return Err(ResultDeserializationError(data))
         status = data.get("status")
         if status == _STATUS_OK:
+            if "value" not in data:
+                return Err(ResultDeserializationError(data))
             return cast(
                 Result[T, E | ResultDeserializationError],
                 self.decode_ok(data.get("value")).map_err(ResultDeserializationError),
             )
         if status == _STATUS_ERROR:
+            if "error" not in data:
+                return Err(ResultDeserializationError(data))
             decoded = self.decode_err(data.get("error")).map_err(
                 ResultDeserializationError
             )

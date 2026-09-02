@@ -259,6 +259,8 @@ def flatten[T](opt: Option[Option[T]]) -> Option[T]:
             return inner
         case Nothing():
             return Nothing()
+        case _:
+            raise Panic(f"flatten expected an Option, got {type(opt).__name__}")
 
 
 def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
@@ -281,7 +283,13 @@ def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
 
     if isinstance(opt, Nothing):
         return Ok(Nothing())
-    inner = opt.value  # Result[T, E]
-    if isinstance(inner, Ok):
-        return Ok(Some(inner.value))
-    return Err(inner.error)
+    if isinstance(opt, Some):
+        inner = opt.value  # Result[T, E]
+        if isinstance(inner, Ok):
+            return Ok(Some(inner.value))
+        if isinstance(inner, Err):
+            return Err(inner.error)
+        raise Panic(
+            f"transpose expected a Some to carry a Result, got {type(inner).__name__}"
+        )
+    raise Panic(f"transpose expected an Option, got {type(opt).__name__}")

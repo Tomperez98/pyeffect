@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from pyeffect.effect import Effect, sequence
+from pyeffect.panic import Panic
 from pyeffect.result import Err, Ok, Result, UnwrapError
 from pyeffect.retry import Policy
 from pyeffect.tagged import UnhandledException
@@ -138,6 +141,12 @@ def test_sequence_materializes_generators() -> None:
     assert sequenced.run() == [0, 1, 2]  # re-runnable even from a generator
 
 
+def test_sequence_rejects_non_result_thunks() -> None:
+    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
+    with pytest.raises(Panic):
+        sequence([Effect.success(1), garbage]).run_result()
+
+
 def add_one(x: int) -> int:
     return x + 1
 
@@ -174,6 +183,14 @@ def test_attempt_is_lazy_until_run() -> None:
 def test_attempt_lets_base_exceptions_propagate() -> None:
     with pytest.raises(SystemExit):
         Effect.attempt(lambda: (_ for _ in ()).throw(SystemExit("stop"))).run()
+
+
+def test_effect_attempt_propagates_panics() -> None:
+    # A defect inside the attempted thunk is a bug, not an expected
+    # failure: it must propagate when the effect runs.
+    effect = Effect.attempt(lambda: Err("boom").unwrap())
+    with pytest.raises(UnwrapError):
+        effect.run_result()
 
 
 def test_zip_pairs_values() -> None:
@@ -216,6 +233,15 @@ def test_zip_runs_both_thunks_in_order() -> None:
     assert order == ["first", "second"]
 
 
+def test_zip_rejects_non_result_thunks() -> None:
+    good: Effect[int, str] = Effect.success(1)
+    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
+    with pytest.raises(Panic):
+        garbage.zip(good).run_result()
+    with pytest.raises(Panic):
+        good.zip(garbage).run_result()
+
+
 def test_map2_applies_function() -> None:
     assert Effect.success(2).map2(Effect.success(3), lambda a, b: a * b).run() == 6
 
@@ -228,6 +254,15 @@ def test_map2_fails_on_first_error() -> None:
 def test_map2_fails_on_second_error() -> None:
     result = Effect.success(2).map2(Effect.failure("boom"), lambda a, b: a * b)
     assert result.run_result() == Err("boom")
+
+
+def test_map2_rejects_non_result_thunks() -> None:
+    good: Effect[int, str] = Effect.success(1)
+    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
+    with pytest.raises(Panic):
+        garbage.map2(good, lambda a, b: a + b).run_result()
+    with pytest.raises(Panic):
+        good.map2(garbage, lambda a, b: a + b).run_result()
 
 
 def test_effect_context_wraps_failure() -> None:
@@ -293,6 +328,14 @@ def test_flatten_collapses_nested_effect() -> None:
     assert nested_err.flatten().run_result() == Err("boom")
     outer_err: Effect[Effect[int, str], str] = Effect.failure("outer")
     assert outer_err.flatten().run_result() == Err("outer")
+
+
+def test_flatten_rejects_non_result_thunks() -> None:
+    garbage: Effect[Effect[int, str], str] = Effect(
+        lambda: cast(Result[Effect[int, str], str], 5)
+    )
+    with pytest.raises(Panic):
+        garbage.flatten().run_result()
 
 
 def test_recover_widens_effect_success_type() -> None:

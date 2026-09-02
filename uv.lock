@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "pyeffect",
+    "pyeffect-checkout",
+]
+
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -58,6 +64,17 @@ dev = [
     { name = "ruff", specifier = ">=0.16.5" },
     { name = "ty", specifier = ">=0.0.77" },
 ]
+
+[[package]]
+name = "pyeffect-checkout"
+version = "0.1.0"
+source = { virtual = "examples/checkout" }
+dependencies = [
+    { name = "pyeffect" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyeffect", editable = "." }]
 
 [[package]]
 name = "pygments"

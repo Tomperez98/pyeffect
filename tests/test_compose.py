@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from pyeffect.compose import (
@@ -19,7 +21,7 @@ from pyeffect.compose import (
 )
 from pyeffect.panic import Panic
 from pyeffect.pipe import pipe
-from pyeffect.result import Err, Ok
+from pyeffect.result import Err, Ok, Result
 
 
 def add_one(x: int) -> int:
@@ -141,8 +143,7 @@ def test_curry_accepts_multiple_args_per_step() -> None:
     # The typed contract is one argument per step; the runtime also accepts
     # several at once. The splat form bypasses ty's arity check, keeping
     # this a pure runtime test (the typed limit is pinned by the fixtures).
-    args = [1, 2]
-    assert curry(lambda a, b, c: a + b + c)(*args)(3) == 6
+    assert curry(lambda a, b, c: a + b + c)(*[1, 2])(3) == 6
 
 
 def test_curry_unary() -> None:
@@ -186,6 +187,25 @@ def test_lift3_applies_ternary() -> None:
     add3 = lift3(lambda a, b, c: a + b + c)
     assert add3(Ok(1), Ok(2), Ok(3)) == Ok(6)
     assert add3(Ok(1), Err("boom"), Ok(3)) == Err("boom")
+
+
+def test_lift_rejects_non_results() -> None:
+    with pytest.raises(Panic):
+        lift(add_one)(cast(Result[int, str], 5))
+
+
+def test_lift2_rejects_non_results() -> None:
+    add2 = lift2(lambda a, b: a + b)
+    with pytest.raises(Panic):
+        add2(cast(Result[int, str], 5), Ok(1))
+    with pytest.raises(Panic):
+        add2(Ok(1), cast(Result[int, str], 5))
+
+
+def test_lift3_rejects_non_results() -> None:
+    add3 = lift3(lambda a, b, c: a + b + c)
+    with pytest.raises(Panic):
+        add3(cast(Result[int, str], 5), Ok(1), Ok(2))
 
 
 def test_partial_is_functools_partial() -> None:

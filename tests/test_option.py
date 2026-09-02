@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from pyeffect.option import (
@@ -172,6 +174,11 @@ def test_flatten() -> None:
     assert flatten(Nothing()) == Nothing()
 
 
+def test_flatten_rejects_non_options() -> None:
+    with pytest.raises(Panic):
+        flatten(cast(Option[Option[int]], 5))
+
+
 def test_result_ok_err_conversions() -> None:
     assert Ok(5).ok() == Some(5)
     assert Ok(5).err() == Nothing()
@@ -203,6 +210,16 @@ def test_transpose_swaps_layers() -> None:
     assert transpose(opt_err) == Err("boom")
     opt_none: Option[Result[int, str]] = Nothing()
     assert transpose(opt_none) == Ok(Nothing())
+
+
+def test_transpose_rejects_non_options() -> None:
+    with pytest.raises(Panic):
+        transpose(cast(Option[Result[int, str]], 5))
+
+
+def test_transpose_rejects_some_with_non_result_payload() -> None:
+    with pytest.raises(Panic):
+        transpose(cast(Option[Result[int, str]], Some(5)))
 
 
 def test_unwrap_nothing_error_exposes_context() -> None:

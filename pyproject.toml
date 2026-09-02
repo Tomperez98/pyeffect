@@ -13,6 +13,13 @@ dependencies = []
 requires = ["uv_build>=0.11.21,<0.12.0"]
 build-backend = "uv_build"
 
+# The examples/ directory is a uv workspace: each example is its own
+# application project (own pyproject.toml, README, and dependencies) that
+# shares this repository's lockfile and virtualenv and links pyeffect
+# from source, so examples always run against the current code.
+[tool.uv.workspace]
+members = ["examples/*"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

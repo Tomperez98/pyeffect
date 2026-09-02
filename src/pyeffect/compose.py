@@ -296,7 +296,9 @@ def lift[T, U, E](
     def lifted(result: Result[T, E]) -> Result[U, E]:
         if isinstance(result, Ok):
             return Ok(f(result.value))
-        return result
+        if isinstance(result, Err):
+            return result
+        raise Panic(f"lift expected a Result, got {type(result).__name__}")
 
     return lifted
 
@@ -311,11 +313,16 @@ def lift2[T, U, R, E](
     """
 
     def lifted(first: Result[T, E], second: Result[U, E]) -> Result[R, E]:
+        if isinstance(first, Ok) and isinstance(second, Ok):
+            return Ok(f(first.value, second.value))
         if isinstance(first, Err):
             return first
         if isinstance(second, Err):
             return second
-        return Ok(f(first.value, second.value))
+        raise Panic(
+            f"lift2 expected Results, got {type(first).__name__} and "
+            f"{type(second).__name__}"
+        )
 
     return lifted
 
@@ -332,12 +339,17 @@ def lift3[T, U, V, R, E](
     def lifted(
         first: Result[T, E], second: Result[U, E], third: Result[V, E]
     ) -> Result[R, E]:
+        if isinstance(first, Ok) and isinstance(second, Ok) and isinstance(third, Ok):
+            return Ok(f(first.value, second.value, third.value))
         if isinstance(first, Err):
             return first
         if isinstance(second, Err):
             return second
         if isinstance(third, Err):
             return third
-        return Ok(f(first.value, second.value, third.value))
+        raise Panic(
+            f"lift3 expected Results, got {type(first).__name__}, "
+            f"{type(second).__name__} and {type(third).__name__}"
+        )
 
     return lifted

@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from pyeffect.panic import Panic
+
 if TYPE_CHECKING:
     from pyeffect.option import Option
     from pyeffect.result import Result
@@ -64,10 +66,19 @@ def do(gen: Generator[Any, None, Any]) -> Any:
     ``Result``/``Option``.
 
     The generator must yield exactly one value — the generator-expression
-    form always does. Yielding a bare non-``Result`` value is a bug the
-    type checker rejects.
+    form always does; yielding none or more than one is a bug and panics.
+    Yielding a bare non-``Result`` value is a bug the type checker rejects.
     """
     try:
-        return next(gen)
+        result = next(gen)
     except _ShortCircuit as short:
         return short.result
+    except StopIteration:
+        raise Panic("do: the generator yielded no value") from None
+    try:
+        next(gen)
+    except StopIteration:
+        return result
+    except _ShortCircuit:
+        raise Panic("do: the generator must yield exactly one value") from None
+    raise Panic("do: the generator must yield exactly one value")
