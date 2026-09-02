@@ -1,17 +1,24 @@
 [project]
 name = "pyeffect"
-version = "0.1.0"
+version = "0.2.0"
 description = "A fully typed functional core for Python: Result, Option, Effect, and composition utilities."
 readme = "README.md"
 authors = [
     { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = []
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]
 build-backend = "uv_build"
+
+# The examples/ directory is a uv workspace: each example is its own
+# application project (own pyproject.toml, README, and dependencies) that
+# shares this repository's lockfile and virtualenv and links pyeffect
+# from source, so examples always run against the current code.
+[tool.uv.workspace]
+members = ["examples/*"]
 
 [dependency-groups]
 dev = [

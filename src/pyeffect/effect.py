@@ -38,14 +38,25 @@ documented compromise of PEP 695 typing, which has no variance annotations.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
-from typing import Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
-from pyeffect.result import Err, ErrorContext, Ok, Result, attempt
-from pyeffect.retry import Policy
-from pyeffect.retry import retry as retry_result
+from pyeffect.do import _ShortCircuit
+from pyeffect.panic import PanicError
+from pyeffect.result import (
+    Err,
+    ErrorContext,
+    Ok,
+    Result,
+    attempt,
+    recover as recover_result,
+)
+from pyeffect.retry import Policy, retry as retry_result
+from pyeffect.tagged import UnhandledError
 
-__all__ = ["Effect", "sequence"]
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Iterable, Iterator
+
+__all__ = ["Effect", "do_effect", "sequence"]
 
 _AttemptT = TypeVar("_AttemptT")
 _AttemptE = TypeVar("_AttemptE")
@@ -61,29 +72,29 @@ class Effect[T, E]:
 
     @staticmethod
     def success[U](value: U) -> Effect[U, Any]:
-        """An effect that yields ``value``.
+        """Return an effect that yields ``value``.
 
         The error slot is unbound (``Any``) so it composes into chains
         with any error type — under Python's invariant generics a
         ``Never`` error slot would refuse to flow into typed chains.
         """
-
         return Effect(lambda: Ok(value))
 
     @staticmethod
     def failure[V](error: V) -> Effect[Any, V]:
-        """An effect that fails with ``error``.
+        """Return an effect that fails with ``error``.
 
         The success slot is unbound (``Any``) — declare it with an
         annotation (``effect: Effect[int, str] = Effect.failure("boom")``)
         and :meth:`catch` recovers with full precision.
         """
-
         return Effect(lambda: Err(error))
 
     @overload
     @staticmethod
-    def attempt(fn: Callable[[], _AttemptT]) -> Effect[_AttemptT, Exception]: ...
+    def attempt(
+        fn: Callable[[], _AttemptT],
+    ) -> Effect[_AttemptT, UnhandledError]: ...
     @overload
     @staticmethod
     def attempt(
@@ -93,14 +104,15 @@ class Effect[T, E]:
     def attempt(
         fn: Callable[[], _AttemptT],
         *,
-        catch: Callable[[Exception], Any] = lambda e: e,
+        catch: Callable[[Exception], Any] = UnhandledError,
     ) -> Effect[_AttemptT, Any]:
-        """An effect that runs ``fn`` and captures its failure as a value.
+        """Return an effect that runs ``fn`` and captures its failure as a value.
 
         The exception boundary for effects: :func:`pyeffect.result.attempt`
         deferred until ``run``/``run_result``. Only ``Exception`` is
-        captured — ``KeyboardInterrupt`` and ``SystemExit`` are
-        bugs/interrupts and must propagate (fail fast).
+        captured — ``KeyboardInterrupt``, ``SystemExit`` and
+        :class:`~pyeffect.panic.PanicError` are bugs and interrupts and must
+        propagate (fail fast).
         """
 
         def thunk() -> Result[_AttemptT, Any]:
@@ -110,22 +122,18 @@ class Effect[T, E]:
 
     def map[U](self, f: Callable[[T], U]) -> Effect[U, E]:
         """Transform the success value; a failure passes through unchanged."""
-
         return Effect(lambda: self._thunk().map(f))
 
     def map_err[E2](self, f: Callable[[E], E2]) -> Effect[T, E2]:
         """Transform the failure value; a success passes through unchanged."""
-
         return Effect(lambda: self._thunk().map_err(f))
 
     def inspect(self, f: Callable[[T], object]) -> Effect[T, E]:
         """Run ``f`` on the success value for its side effect, lazily."""
-
         return Effect(lambda: self._thunk().inspect(f))
 
     def inspect_err(self, f: Callable[[E], object]) -> Effect[T, E]:
         """Run ``f`` on the failure for its side effect, lazily."""
-
         return Effect(lambda: self._thunk().inspect_err(f))
 
     def and_then[U](self, f: Callable[[T], Effect[U, E]]) -> Effect[U, E]:
@@ -138,7 +146,6 @@ class Effect[T, E]:
 
     def and_[U](self, other: Effect[U, E]) -> Effect[U, E]:
         """Run ``self``; on success run and return ``other`` (the eager ``and``)."""
-
         return self.and_then(lambda _: other)
 
     def flatten[U](self: Effect[Effect[U, E], E]) -> Effect[U, E]:
@@ -148,7 +155,10 @@ class Effect[T, E]:
             outer = self._thunk()
             if isinstance(outer, Ok):
                 return outer.value.run_result()
-            return outer
+            if isinstance(outer, Err):
+                return outer
+            msg = f"effect thunk returned {type(outer).__name__}, expected a Result"
+            raise PanicError(msg)
 
         return Effect(thunk)
 
@@ -166,8 +176,16 @@ class Effect[T, E]:
                 second = other._thunk()
                 if isinstance(second, Ok):
                     return Ok((first.value, second.value))
-                return second
-            return first
+                if isinstance(second, Err):
+                    return second
+                msg = (
+                    f"effect thunk returned {type(second).__name__}, expected a Result"
+                )
+                raise PanicError(msg)
+            if isinstance(first, Err):
+                return first
+            msg = f"effect thunk returned {type(first).__name__}, expected a Result"
+            raise PanicError(msg)
 
         return Effect(thunk)
 
@@ -183,8 +201,16 @@ class Effect[T, E]:
                 second = other._thunk()
                 if isinstance(second, Ok):
                     return Ok(f(first.value, second.value))
-                return second
-            return first
+                if isinstance(second, Err):
+                    return second
+                msg = (
+                    f"effect thunk returned {type(second).__name__}, expected a Result"
+                )
+                raise PanicError(msg)
+            if isinstance(first, Err):
+                return first
+            msg = f"effect thunk returned {type(first).__name__}, expected a Result"
+            raise PanicError(msg)
 
         return Effect(thunk)
 
@@ -196,21 +222,31 @@ class Effect[T, E]:
 
         return Effect(thunk)
 
+    def recover[U, E2](self, f: Callable[[E], Effect[U, E2]]) -> Effect[T | U, E2]:
+        """Recover from failure, possibly widening the success type (lazy).
+
+        ``recover`` is :meth:`catch` generalized: the callback may succeed
+        with a *different* type ``U``, so the effect's success slot widens to
+        ``T | U``.
+        """
+
+        def thunk() -> Result[T | U, E2]:
+            return recover_result(self._thunk(), lambda error: f(error).run_result())
+
+        return Effect(thunk)
+
     def or_[F](self, other: Effect[T, F]) -> Effect[T, F]:
         """Run ``self``; on failure run and return ``other`` (the eager ``or``)."""
-
         return self.catch(lambda _: other)
 
     def map_or[R](self, default: R, f: Callable[[T], R]) -> Effect[R, E]:
         """Apply ``f`` to the value, or yield ``default`` on failure."""
-
         return Effect(lambda: Ok(self._thunk().map_or(default, f)))
 
     def map_or_else[R](
         self, default: Callable[[E], R], f: Callable[[T], R]
     ) -> Effect[R, E]:
         """Apply ``f`` to the value, or ``default(error)`` on failure."""
-
         return Effect(lambda: Ok(self._thunk().map_or_else(default, f)))
 
     def context(self, message: str) -> Effect[T, ErrorContext]:
@@ -220,12 +256,10 @@ class Effect[T, E]:
         becomes an :class:`~pyeffect.result.ErrorContext` carrying the
         message and the original error.
         """
-
         return Effect(lambda: self._thunk().context(message))
 
     def with_context(self, f: Callable[[E], str]) -> Effect[T, ErrorContext]:
         """Like :meth:`context`, but the message is computed lazily on failure."""
-
         return Effect(lambda: self._thunk().with_context(f))
 
     def retry(
@@ -243,7 +277,6 @@ class Effect[T, E]:
 
     def run_result(self) -> Result[T, E]:
         """Execute the effect and return its :data:`Result`."""
-
         return self._thunk()
 
     def run(self) -> T:
@@ -253,8 +286,21 @@ class Effect[T, E]:
         caller chose the fail-fast edge. Use :meth:`run_result` or
         :meth:`catch` to handle failure as a value.
         """
-
         return self._thunk().unwrap()
+
+    def __iter__(self) -> Iterator[T]:
+        """Run the effect and yield its value (do-notation support).
+
+        Iterating an effect executes its thunk — but only when the
+        enclosing ``do_effect`` thunk runs, so laziness is preserved. A
+        failure raises :class:`_ShortCircuit`.
+        """
+        result = self.run_result()
+        match result:
+            case Ok():
+                yield result.value
+            case Err():
+                raise _ShortCircuit(result)
 
 
 def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
@@ -263,7 +309,6 @@ def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
     The effects are materialized up front, so the resulting effect is
     re-runnable even when given a generator.
     """
-
     materialized = list(effects)
 
     def thunk() -> Result[list[T], E]:
@@ -272,8 +317,56 @@ def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
             result = effect.run_result()
             if isinstance(result, Ok):
                 values.append(result.value)
-            else:
+                continue
+            if isinstance(result, Err):
                 return result
+            msg = (
+                f"sequence: an effect returned {type(result).__name__}, "
+                f"expected a Result"
+            )
+            raise PanicError(msg)
         return Ok(values)
+
+    return Effect(thunk)
+
+
+def do_effect[T, E](
+    build: Callable[[], Generator[Effect[T, E]]],
+) -> Effect[T, E]:
+    """Compose a sequence of effects lazily into one re-runnable effect.
+
+    ``build`` must return a *fresh* generator expression each call, so the
+    resulting effect is re-runnable: every ``run``/``run_result``
+    re-invokes ``build`` and re-executes each step. Each
+    ``for ... in effect`` clause runs one effect; the first expression is
+    the final effect. A builder that yields no effect or more than one is a
+    defect and panics when the effect runs::
+
+        >>> from pyeffect import Effect
+        >>> from pyeffect.effect import do_effect
+        >>> do_effect(
+        ...     lambda: (Effect.success(x * 2) for x in Effect.success(21))
+        ... ).run()
+        42
+    """
+
+    def thunk() -> Result[T, E]:
+        generator = build()
+        try:
+            effect = next(generator)
+        except _ShortCircuit as short:
+            return short.result
+        except StopIteration:
+            msg = "do_effect: the builder yielded no effect"
+            raise PanicError(msg) from None
+        try:
+            next(generator)
+        except StopIteration:
+            return effect.run_result()
+        except _ShortCircuit:
+            msg = "do_effect: the builder must yield exactly one effect"
+            raise PanicError(msg) from None
+        msg = "do_effect: the builder must yield exactly one effect"
+        raise PanicError(msg)
 
     return Effect(thunk)

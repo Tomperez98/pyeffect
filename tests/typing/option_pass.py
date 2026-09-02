@@ -1,5 +1,7 @@
 """Typing fixture: valid Option calls pinned with assert_type."""
 
+from __future__ import annotations
+
 from typing import Literal, assert_type
 
 from pyeffect.option import Nothing, Option, Some, flatten, from_optional, transpose
@@ -27,7 +29,7 @@ def main(n: int, boom: str) -> None:
 
     # filter and inspect keep the value type.
     assert_type(Some(n).filter(lambda x: x > 0).unwrap(), int)
-    assert_type(Some(n).inspect(lambda x: None).unwrap(), int)
+    assert_type(Some(n).inspect(lambda _: None).unwrap(), int)
 
     # Option -> Result conversions. Method-scoped typevars on Nothing need
     # binding context, so those are pinned via annotated assignments.

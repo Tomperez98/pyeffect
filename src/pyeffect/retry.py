@@ -12,38 +12,67 @@ and no real sleeping::
 
 from __future__ import annotations
 
+import random
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, assert_never
 
+from pyeffect.panic import PanicError
 from pyeffect.result import Ok, Result
 
-__all__ = ["Policy", "retry"]
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = ["Backoff", "Policy", "retry"]
+
+
+type Backoff = Literal["constant", "linear", "exponential"]
 
 
 @dataclass(frozen=True, slots=True)
 class Policy:
-    """How many attempts, and how long to wait between them.
+    """How many attempts, how long to wait, and how that wait grows.
 
     A broken policy is a bug, so it panics at construction (fail fast)
     instead of looping forever or never running.
 
     Attributes:
         max_attempts: Total attempts, including the first (>= 1).
-        delay: Seconds to sleep between attempts (>= 0).
+        delay: Base seconds to sleep between attempts (>= 0).
+        backoff: How ``delay`` grows across attempts.
+        jitter: Fraction in ``[0, 1]`` by which a delay may be randomly
+            shortened (0 = none, 1 = fully randomized).
+
     """
 
     max_attempts: int
     delay: float = 0.0
+    backoff: Backoff = "constant"
+    jitter: float = 0.0
 
     def __post_init__(self) -> None:
-        # Explicit raises, not assert: `python -O` strips asserts, which would
-        # let a broken policy through to a misleading "unreachable" error in
-        # `retry`. A broken policy is a defect and must panic unconditionally.
+        # A broken policy is a defect and must panic unconditionally.
         if self.max_attempts < 1:
-            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+            msg = f"max_attempts must be >= 1, got {self.max_attempts}"
+            raise PanicError(msg)
         if self.delay < 0.0:
-            raise ValueError(f"delay must be >= 0, got {self.delay}")
+            msg = f"delay must be >= 0, got {self.delay}"
+            raise PanicError(msg)
+        if not 0.0 <= self.jitter <= 1.0:
+            msg = f"jitter must be in [0, 1], got {self.jitter}"
+            raise PanicError(msg)
+
+
+def _base_delay(retry_number: int, policy: Policy) -> float:
+    match policy.backoff:
+        case "constant":
+            return policy.delay
+        case "linear":
+            return policy.delay * retry_number
+        case "exponential":
+            return policy.delay * (2 ** (retry_number - 1))
+        case _:
+            assert_never(policy.backoff)
 
 
 def retry[T, E](
@@ -51,19 +80,53 @@ def retry[T, E](
     policy: Policy,
     *,
     sleep: Callable[[float], None] = time.sleep,
+    should_retry: Callable[[E, int], bool] = lambda _error, _attempt: True,
+    delay: Callable[[E, int], float] | None = None,
+    random_float: Callable[[], float] = random.random,
 ) -> Result[T, E]:
     """Run ``operation`` up to ``policy.max_attempts`` times.
 
     ``operation`` receives the 1-based attempt number and must return a
     :data:`Result`. On ``Ok`` it stops immediately; after the final attempt
     it returns the last ``Err`` — a value the caller decides how to handle.
-    Failure is expected, so it is returned, never raised.
+
+    ``delay(error, attempt)`` supplies an error-dependent final delay. When
+    provided it overrides the policy's static ``delay``/``backoff``/``jitter``
+    (combining it with ``backoff`` or ``jitter`` is a defect and panics).
+    A throwing ``should_retry`` or ``delay`` callback is a defect and becomes
+    a :class:`PanicError`, never a returned ``Err``.
     """
+    if delay is not None and (policy.backoff != "constant" or policy.jitter != 0.0):
+        msg = "a dynamic delay cannot be combined with backoff or jitter"
+        raise PanicError(msg)
+
     for attempt in range(1, policy.max_attempts + 1):
         result = operation(attempt)
         if isinstance(result, Ok):
             return result
         if attempt == policy.max_attempts:
             return result
-        sleep(policy.delay)
-    raise AssertionError("unreachable: Policy.max_attempts >= 1 guarantees a return")
+        try:
+            if not should_retry(result.error, attempt):
+                return result
+        except Exception as exc:
+            msg = "should_retry callback raised"
+            raise PanicError(msg, cause=exc) from exc
+        try:
+            wait = (
+                delay(result.error, attempt)
+                if delay is not None
+                else _base_delay(attempt, policy) * _jitter(policy, random_float)
+            )
+        except Exception as exc:
+            msg = "delay callback raised"
+            raise PanicError(msg, cause=exc) from exc
+        sleep(wait)
+    msg = "unreachable: Policy.max_attempts >= 1 guarantees a return"
+    raise PanicError(msg)
+
+
+def _jitter(policy: Policy, random_float: Callable[[], float]) -> float:
+    if policy.jitter:
+        return 1.0 - policy.jitter * random_float()
+    return 1.0

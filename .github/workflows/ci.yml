@@ -31,11 +31,9 @@ jobs:
         run: uv lock --check
 
   # Single runner and single Python: pyeffect is pure Python with no
-  # platform-specific code, and requires-python >= 3.14 leaves one
+  # platform-specific code, and .python-version (3.12) leaves one
   # interpreter to test. No coverage step — pytest-cov isn't a dependency
-  # and there's no Codecov setup on this repo. The examples and
-  # integration-pg jobs from the reference don't apply here (no examples
-  # dir, no resonate server, no database connector to prove against).
+  # and there's no Codecov setup on this repo.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -48,7 +46,7 @@ jobs:
         with:
           version: 0.11.21
 
-      # setup-python reads .python-version (3.14), so the interpreter and
+      # setup-python reads .python-version, so the interpreter and
       # requires-python stay in sync from one place.
       - name: set up python
         uses: actions/setup-python@v5
@@ -59,8 +57,9 @@ jobs:
       - name: check linting
         run: uv run ruff check
 
-      # The checked surface is `src tests`, matching the README: the
-      # tests/typing/ fixtures are what gate the library's type contracts.
+      # ruff/ty run over the whole workspace: src, tests (including the
+      # tests/typing/ fixtures that gate the library's type contracts),
+      # and every project under examples/.
       - name: check types
         run: uv run ty check
 

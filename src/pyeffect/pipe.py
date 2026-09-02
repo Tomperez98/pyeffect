@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = ["pipe"]
 
@@ -144,6 +146,7 @@ def pipe(value: Any, *functions: Callable[[Any], Any]) -> Any:
         '6'
         >>> pipe(2)  # identity with no functions
         2
+
     """
     for function in functions:
         value = function(value)

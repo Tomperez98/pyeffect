@@ -26,11 +26,14 @@ calls; ``lift``/``lift2``/``lift3`` push plain functions into the
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
 from functools import partial
-from typing import Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok, Result
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
     "compose",
@@ -160,7 +163,6 @@ def compose(*functions: Callable[[Any], Any]) -> Callable[[Any], Any]:
 
 def identity[A](value: A) -> A:
     """Return ``value`` unchanged."""
-
     return value
 
 
@@ -226,15 +228,17 @@ def _positional_arity(f: Callable[..., Any]) -> int:
     parameters = inspect.signature(f).parameters.values()
     for parameter in parameters:
         if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
-            raise TypeError(f"curry requires a fixed arity, got variadic {f!r}")
+            msg = f"curry requires a fixed arity, got variadic {f!r}"
+            raise PanicError(msg)
         if (
             parameter.kind is inspect.Parameter.KEYWORD_ONLY
             and parameter.default is inspect.Parameter.empty
         ):
-            raise TypeError(
+            msg = (
                 f"curry requires positional parameters only, got required "
                 f"keyword-only {parameter.name!r} in {f!r}"
             )
+            raise PanicError(msg)
     return sum(
         1
         for parameter in parameters
@@ -295,7 +299,10 @@ def lift[T, U, E](
     def lifted(result: Result[T, E]) -> Result[U, E]:
         if isinstance(result, Ok):
             return Ok(f(result.value))
-        return result
+        if isinstance(result, Err):
+            return result
+        msg = f"lift expected a Result, got {type(result).__name__}"
+        raise PanicError(msg)
 
     return lifted
 
@@ -310,11 +317,17 @@ def lift2[T, U, R, E](
     """
 
     def lifted(first: Result[T, E], second: Result[U, E]) -> Result[R, E]:
+        if isinstance(first, Ok) and isinstance(second, Ok):
+            return Ok(f(first.value, second.value))
         if isinstance(first, Err):
             return first
         if isinstance(second, Err):
             return second
-        return Ok(f(first.value, second.value))
+        msg = (
+            f"lift2 expected Results, got {type(first).__name__} and "
+            f"{type(second).__name__}"
+        )
+        raise PanicError(msg)
 
     return lifted
 
@@ -331,12 +344,18 @@ def lift3[T, U, V, R, E](
     def lifted(
         first: Result[T, E], second: Result[U, E], third: Result[V, E]
     ) -> Result[R, E]:
+        if isinstance(first, Ok) and isinstance(second, Ok) and isinstance(third, Ok):
+            return Ok(f(first.value, second.value, third.value))
         if isinstance(first, Err):
             return first
         if isinstance(second, Err):
             return second
         if isinstance(third, Err):
             return third
-        return Ok(f(first.value, second.value, third.value))
+        msg = (
+            f"lift3 expected Results, got {type(first).__name__}, "
+            f"{type(second).__name__} and {type(third).__name__}"
+        )
+        raise PanicError(msg)
 
     return lifted

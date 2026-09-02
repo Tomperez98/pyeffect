@@ -1,5 +1,13 @@
 """pyeffect: a fully typed functional core for Python."""
 
+from __future__ import annotations
+
+from pyeffect.codec import (
+    Codec,
+    ResultDeserializationError,
+    ResultSerializationError,
+    from_dict,
+)
 from pyeffect.compose import (
     compose,
     constant,
@@ -13,7 +21,8 @@ from pyeffect.compose import (
     tap,
     unpack,
 )
-from pyeffect.effect import Effect, sequence
+from pyeffect.do import do
+from pyeffect.effect import Effect, do_effect, sequence
 from pyeffect.option import (
     Nothing,
     Option,
@@ -22,6 +31,7 @@ from pyeffect.option import (
     flatten,
     from_optional,
 )
+from pyeffect.panic import PanicError, is_panic, panic
 from pyeffect.pipe import pipe
 from pyeffect.result import (
     Err,
@@ -31,36 +41,66 @@ from pyeffect.result import (
     UnwrapError,
     attempt,
     guard,
+    is_err,
+    is_ok,
+    partition,
+    recover,
     traverse,
 )
-from pyeffect.retry import Policy, retry
+from pyeffect.retry import Backoff, Policy, retry
+from pyeffect.tagged import (
+    MatchError,
+    TaggedError,
+    UnhandledError,
+    match_error,
+    match_error_partial,
+)
 
 __all__ = [
+    "Backoff",
+    "Codec",
     "Effect",
     "Err",
     "ErrorContext",
+    "MatchError",
     "Nothing",
     "Ok",
     "Option",
+    "PanicError",
     "Policy",
     "Result",
+    "ResultDeserializationError",
+    "ResultSerializationError",
     "Some",
+    "TaggedError",
+    "UnhandledError",
     "UnwrapError",
     "UnwrapNothingError",
     "attempt",
     "compose",
     "constant",
     "curry",
+    "do",
+    "do_effect",
     "flatten",
     "flip",
+    "from_dict",
     "from_optional",
     "guard",
     "identity",
+    "is_err",
+    "is_ok",
+    "is_panic",
     "lift",
     "lift2",
     "lift3",
+    "match_error",
+    "match_error_partial",
+    "panic",
     "partial",
+    "partition",
     "pipe",
+    "recover",
     "retry",
     "sequence",
     "tap",

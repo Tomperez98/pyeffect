@@ -1,5 +1,7 @@
 """Typing fixture: a chain whose types do not line up. Must fail `ty`."""
 
+from __future__ import annotations
+
 from pyeffect import pipe
 
 

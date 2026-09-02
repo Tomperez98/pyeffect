@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from pyeffect.compose import (
@@ -17,8 +19,9 @@ from pyeffect.compose import (
     tap,
     unpack,
 )
+from pyeffect.panic import PanicError
 from pyeffect.pipe import pipe
-from pyeffect.result import Err, Ok
+from pyeffect.result import Err, Ok, Result
 
 
 def add_one(x: int) -> int:
@@ -140,8 +143,7 @@ def test_curry_accepts_multiple_args_per_step() -> None:
     # The typed contract is one argument per step; the runtime also accepts
     # several at once. The splat form bypasses ty's arity check, keeping
     # this a pure runtime test (the typed limit is pinned by the fixtures).
-    args = [1, 2]
-    assert curry(lambda a, b, c: a + b + c)(*args)(3) == 6
+    assert curry(lambda a, b, c: a + b + c)(*[1, 2])(3) == 6
 
 
 def test_curry_unary() -> None:
@@ -153,7 +155,7 @@ def test_curry_zero_arity() -> None:
 
 
 def test_curry_rejects_variadic() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(PanicError):
         curry(lambda *args: sum(args))
 
 
@@ -161,7 +163,7 @@ def test_curry_rejects_required_keyword_only() -> None:
     def needs_kw(a: int, *, b: int) -> int:
         return a + b
 
-    with pytest.raises(TypeError):
+    with pytest.raises(PanicError):
         curry(needs_kw)  # ty: ignore[no-matching-overload]
 
 
@@ -185,6 +187,25 @@ def test_lift3_applies_ternary() -> None:
     add3 = lift3(lambda a, b, c: a + b + c)
     assert add3(Ok(1), Ok(2), Ok(3)) == Ok(6)
     assert add3(Ok(1), Err("boom"), Ok(3)) == Err("boom")
+
+
+def test_lift_rejects_non_results() -> None:
+    with pytest.raises(PanicError):
+        lift(add_one)(cast("Result[int, str]", 5))
+
+
+def test_lift2_rejects_non_results() -> None:
+    add2 = lift2(lambda a, b: a + b)
+    with pytest.raises(PanicError):
+        add2(cast("Result[int, str]", 5), Ok(1))
+    with pytest.raises(PanicError):
+        add2(Ok(1), cast("Result[int, str]", 5))
+
+
+def test_lift3_rejects_non_results() -> None:
+    add3 = lift3(lambda a, b, c: a + b + c)
+    with pytest.raises(PanicError):
+        add3(cast("Result[int, str]", 5), Ok(1), Ok(2))
 
 
 def test_partial_is_functools_partial() -> None:

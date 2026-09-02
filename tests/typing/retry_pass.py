@@ -1,5 +1,7 @@
 """Typing fixture: valid retry calls pinned with assert_type."""
 
+from __future__ import annotations
+
 from typing import assert_type
 
 from pyeffect.result import Err, Ok, Result
@@ -16,3 +18,10 @@ def main() -> None:
 
     # sleep is injectable and typed as Callable[[float], None].
     assert_type(retry(operation, policy, sleep=print), Result[int, str])
+
+    dynamic = retry(
+        operation,
+        Policy(max_attempts=3),
+        delay=lambda error, _: 1.0 if error == "not yet" else 0.0,
+    )
+    assert_type(dynamic, Result[int, str])

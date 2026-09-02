@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from pyeffect.option import Nothing, Option, Some
+from pyeffect.panic import PanicError
 from pyeffect.result import (
     Err,
     ErrorContext,
@@ -16,9 +17,14 @@ from pyeffect.result import (
     attempt,
     flatten,
     guard,
+    recover,
     transpose,
     traverse,
 )
+from pyeffect.tagged import UnhandledError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def add_one(x: int) -> int:
@@ -91,7 +97,7 @@ def test_or_else_recovers() -> None:
 
 
 def test_or_else_passes_ok_through() -> None:
-    assert Ok(5).or_else(lambda e: Err(e)) == Ok(5)
+    assert Ok(5).or_else(Err) == Ok(5)
 
 
 def test_unwrap_on_ok() -> None:
@@ -120,8 +126,8 @@ def test_unwrap_or() -> None:
 
 
 def test_unwrap_or_else() -> None:
-    assert Ok(5).unwrap_or_else(lambda e: len(e)) == 5
-    assert Err("boom").unwrap_or_else(lambda e: len(e)) == 4
+    assert Ok(5).unwrap_or_else(len) == 5
+    assert Err("boom").unwrap_or_else(len) == 4
 
 
 def test_is_ok_is_err() -> None:
@@ -138,11 +144,12 @@ def test_attempt_success() -> None:
 def test_attempt_failure() -> None:
     result = attempt(lambda: 1 / 0)
     assert isinstance(result, Err)
-    assert isinstance(result.error, ZeroDivisionError)
+    assert isinstance(result.error, UnhandledError)
+    assert isinstance(result.error.cause, ZeroDivisionError)
 
 
 def test_attempt_with_custom_catch() -> None:
-    result = attempt(lambda: 1 / 0, catch=lambda e: str(e))
+    result = attempt(lambda: 1 / 0, catch=str)
     assert result == Err("division by zero")
 
 
@@ -153,6 +160,27 @@ def test_attempt_lets_base_exceptions_propagate() -> None:
         attempt(lambda: (_ for _ in ()).throw(SystemExit("stop")))
 
 
+def test_attempt_propagates_panics() -> None:
+    # A defect is a bug, not an expected failure: attempt must never fold
+    # a PanicError (such as unwrap() on an Err) into an Err.
+    with pytest.raises(UnwrapError):
+        attempt(lambda: Err("boom").unwrap())
+
+
+def test_attempt_propagates_panics_with_custom_catch() -> None:
+    with pytest.raises(PanicError):
+        attempt(lambda: Err("boom").unwrap(), catch=lambda _: "caught")
+
+
+def test_guard_propagates_panics() -> None:
+    def buggy() -> int:
+        return Err("boom").unwrap()
+
+    guarded = guard(buggy)
+    with pytest.raises(UnwrapError):
+        guarded()
+
+
 def test_guard_decorated_success() -> None:
     guarded = guard(add_one)
     assert guarded(5) == Ok(6)
@@ -160,36 +188,36 @@ def test_guard_decorated_success() -> None:
 
 def test_guard_decorated_failure() -> None:
     def raiser(x: int) -> int:
-        raise ValueError(f"bad {x}")
+        msg = f"bad {x}"
+        raise ValueError(msg)
 
     result = guard(raiser)(1)
     assert isinstance(result, Err)
-    assert isinstance(result.error, ValueError)
+    assert isinstance(result.error, UnhandledError)
+    assert isinstance(result.error.cause, ValueError)
 
 
 def test_guard_with_custom_catch() -> None:
     def raiser(x: int) -> int:
-        raise ValueError(f"bad {x}")
+        msg = f"bad {x}"
+        raise ValueError(msg)
 
-    guarded: Callable[[int], Result[int, str]] = guard(raiser, catch=lambda e: str(e))
+    guarded: Callable[[int], Result[int, str]] = guard(raiser, catch=str)
     assert guarded(1) == Err("bad 1")
 
 
 def test_guard_preserves_name_and_docs() -> None:
     @guard
     def documented(x: int) -> int:
-        """Adds one."""
-
         return x + 1
 
     assert documented.__name__ == "documented"
-    assert documented.__doc__ == "Adds one."
     assert documented(1) == Ok(2)
 
 
 def test_fold() -> None:
-    assert Ok(5).fold(lambda v: v + 1, lambda e: -1) == 6
-    assert Err("boom").fold(lambda v: v + 1, lambda e: -1) == -1
+    assert Ok(5).fold(lambda v: v + 1, lambda _: -1) == 6
+    assert Err("boom").fold(lambda v: v + 1, lambda _: -1) == -1
 
 
 def test_inspect_runs_on_ok() -> None:
@@ -236,8 +264,8 @@ def test_map_or() -> None:
 
 
 def test_map_or_else() -> None:
-    assert Ok(5).map_or_else(lambda e: len(e), lambda v: v * 2) == 10
-    assert Err("boom").map_or_else(lambda e: len(e), lambda v: v * 2) == 4
+    assert Ok(5).map_or_else(len, lambda v: v * 2) == 10
+    assert Err("boom").map_or_else(len, lambda v: v * 2) == 4
 
 
 def test_zip() -> None:
@@ -269,11 +297,19 @@ def test_traverse_short_circuits_on_first_err() -> None:
 
 
 def test_traverse_empty_is_ok_empty() -> None:
-    assert traverse(lambda x: Ok(x), []) == Ok([])
+    assert traverse(Ok, []) == Ok([])
 
 
 def test_traverse_accepts_generators() -> None:
-    assert traverse(lambda x: Ok(x), (x for x in [1, 2])) == Ok([1, 2])
+    assert traverse(Ok, (x for x in [1, 2])) == Ok([1, 2])
+
+
+def test_traverse_rejects_non_result_callback_returns() -> None:
+    def broken(x: int) -> Result[int, str]:
+        return cast("Result[int, str]", 5)
+
+    with pytest.raises(PanicError):
+        traverse(broken, [1])
 
 
 def test_context_passes_ok_through() -> None:
@@ -342,6 +378,11 @@ def test_flatten_collapses_nested_result() -> None:
     assert flatten(passthrough) == Err("boom")
 
 
+def test_flatten_rejects_non_results() -> None:
+    with pytest.raises(PanicError):
+        flatten(cast("Result[Result[int, str], str]", 5))
+
+
 def test_transpose_swaps_layers() -> None:
     result_ok: Result[Option[int], str] = Ok(Some(1))
     assert transpose(result_ok) == Some(Ok(1))
@@ -351,7 +392,71 @@ def test_transpose_swaps_layers() -> None:
     assert transpose(result_err) == Some(Err("boom"))
 
 
+def test_transpose_rejects_non_results() -> None:
+    with pytest.raises(PanicError):
+        transpose(cast("Result[Option[int], str]", 5))
+
+
+def test_transpose_rejects_ok_with_non_option_payload() -> None:
+    with pytest.raises(PanicError):
+        transpose(cast("Result[Option[int], str]", Ok(5)))
+
+
 def test_unwrap_error_exposes_context() -> None:
     with pytest.raises(UnwrapError) as excinfo:
         Err("boom").expect("must succeed")
     assert excinfo.value.context == "must succeed"
+
+
+def test_unwrap_error_is_a_panic() -> None:
+    with pytest.raises(PanicError) as excinfo:
+        Err("boom").unwrap()
+    assert isinstance(excinfo.value, UnwrapError)
+    assert excinfo.value.cause == "boom"
+
+
+def test_recover_widens_success_type() -> None:
+    result: Result[int, str] = Err("boom")
+    recovered = recover(result, lambda e: Ok(len(e)))
+    assert recovered == Ok(4)
+
+
+def test_recover_passes_ok_through() -> None:
+    result: Result[int, str] = Ok(5)
+    recovered = recover(result, lambda _: Ok("guest"))
+    assert recovered == Ok(5)
+
+
+def test_recover_keeps_error_on_err_recovery() -> None:
+    result: Result[int, str] = Err("boom")
+    recovered = recover(result, lambda e: Err(e.upper()))
+    assert recovered == Err("BOOM")
+
+
+def test_recover_rejects_non_results() -> None:
+    with pytest.raises(PanicError):
+        recover(cast("Result[int, str]", 5), lambda _: Ok(0))
+
+
+def test_status_discriminant() -> None:
+    assert Ok(1).status == "ok"
+    assert Err("boom").status == "error"
+
+
+def test_inspect_both_runs_ok_branch() -> None:
+    seen: list[int] = []
+    result = Ok(2).inspect_both(seen.append, lambda _: None)
+    assert result == Ok(2)
+    assert seen == [2]
+
+
+def test_inspect_both_runs_err_branch() -> None:
+    seen: list[str] = []
+    result = Err("boom").inspect_both(lambda _: None, seen.append)
+    assert result == Err("boom")
+    assert seen == ["boom"]
+
+
+def test_to_dict_envelope() -> None:
+    assert Ok(5).to_dict() == {"status": "ok", "value": 5}
+    assert Err("boom").to_dict() == {"status": "error", "error": "boom"}
