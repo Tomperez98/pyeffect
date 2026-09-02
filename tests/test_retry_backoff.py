@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from pyeffect.panic import Panic
 from pyeffect.retry import Backoff, Policy, _base_delay
 
 
@@ -14,9 +15,9 @@ def test_policy_defaults_are_backward_compatible() -> None:
 
 
 def test_policy_rejects_out_of_range_jitter() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Panic):
         Policy(max_attempts=3, jitter=1.5)
-    with pytest.raises(ValueError):
+    with pytest.raises(Panic):
         Policy(max_attempts=3, jitter=-0.1)
 
 

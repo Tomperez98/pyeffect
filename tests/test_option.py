@@ -13,6 +13,7 @@ from pyeffect.option import (
     from_optional,
     transpose,
 )
+from pyeffect.panic import Panic
 from pyeffect.result import Err, Ok, Result
 
 
@@ -208,3 +209,9 @@ def test_unwrap_nothing_error_exposes_context() -> None:
     with pytest.raises(UnwrapNothingError) as excinfo:
         Nothing().expect("must be present")
     assert excinfo.value.context == "must be present"
+
+
+def test_unwrap_nothing_error_is_a_panic() -> None:
+    with pytest.raises(Panic) as excinfo:
+        Nothing().unwrap()
+    assert isinstance(excinfo.value, UnwrapNothingError)

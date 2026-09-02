@@ -38,10 +38,21 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, NoReturn, ParamSpec, TypeVar, cast, overload
+from typing import (
+    Any,
+    ClassVar,
+    NoReturn,
+    ParamSpec,
+    TypeGuard,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from pyeffect.do import _ShortCircuit
 from pyeffect.option import Nothing, Option, Some
+from pyeffect.panic import Panic
+from pyeffect.tagged import UnhandledException
 
 __all__ = [
     "Err",
@@ -52,7 +63,10 @@ __all__ = [
     "attempt",
     "flatten",
     "guard",
+    "is_err",
+    "is_ok",
     "partition",
+    "recover",
     "transpose",
     "traverse",
 ]
@@ -62,20 +76,23 @@ _T = TypeVar("_T")
 _T2 = TypeVar("_T2")
 
 
-class UnwrapError(Exception):
+class UnwrapError(Panic):
     """Raised when ``unwrap()``/``expect()`` is called on an ``Err``.
 
     Unwrapping a failure is a bug — the caller promised success. Panic
-    instead of silently returning a wrong value.
+    instead of silently returning a wrong value. It is a :class:`Panic`
+    subtype, so catching ``Panic`` catches it at a defect boundary, while
+    ``pytest.raises(UnwrapError)`` stays precise.
 
     Attributes:
         error: The payload of the ``Err`` that was unwrapped.
+        cause: The same payload, exposed via the :class:`Panic` contract.
     """
 
     def __init__(self, error: object, context: str = "unwrap() on Err") -> None:
         self.error = error
         self.context = context
-        super().__init__(f"{context}: Err({error!r})")
+        super().__init__(f"{context}: Err({error!r})", cause=error)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +115,7 @@ class Ok[T]:
     """The success variant of :data:`Result`, carrying a ``value``."""
 
     value: T
+    status: ClassVar[str] = "ok"
 
     __match_args__ = ("value",)
 
@@ -201,6 +219,18 @@ class Ok[T]:
 
         return self
 
+    def inspect_both[E](
+        self, on_ok: Callable[[T], object], on_err: Callable[..., object]
+    ) -> Result[T, E]:
+        """Run ``on_ok`` for its side effect; pass the result through.
+
+        The two-branch ``tap``: observe either outcome in one call. On an
+        ``Ok``, only ``on_ok`` runs.
+        """
+
+        on_ok(self.value)
+        return self
+
     def contains(self, value: object) -> bool:
         """Whether the carried value equals ``value``."""
 
@@ -245,12 +275,18 @@ class Ok[T]:
 
         return self
 
+    def to_dict(self) -> dict[str, object]:
+        """The wire envelope ``{"status": "ok", "value": ...}``."""
+
+        return {"status": self.status, "value": self.value}
+
 
 @dataclass(frozen=True, slots=True)
 class Err[E]:
     """The failure variant of :data:`Result`, carrying an ``error``."""
 
     error: E
+    status: ClassVar[str] = "error"
 
     __match_args__ = ("error",)
 
@@ -353,6 +389,18 @@ class Err[E]:
         f(self.error)
         return self
 
+    def inspect_both[T](
+        self, on_ok: Callable[..., object], on_err: Callable[[E], object]
+    ) -> Result[T, E]:
+        """Run ``on_err`` for its side effect; pass the result through.
+
+        The two-branch ``tap``: observe either outcome in one call. On an
+        ``Err``, only ``on_err`` runs.
+        """
+
+        on_err(self.error)
+        return self
+
     def contains(self, value: object) -> bool:
         """Whether the carried value equals ``value`` — always ``False``."""
 
@@ -388,6 +436,11 @@ class Err[E]:
 
         return Err(ErrorContext(f(self.error), self.error))
 
+    def to_dict(self) -> dict[str, object]:
+        """The wire envelope ``{"status": "error", "error": ...}``."""
+
+        return {"status": self.status, "error": self.error}
+
 
 # Note: ``Result`` is a typing union (Ok[T] | Err[E]), not a runtime class.
 # ``isinstance(x, Result)`` raises TypeError — use ``match``, ``is_ok()``,
@@ -395,8 +448,24 @@ class Err[E]:
 type Result[T, E] = Ok[T] | Err[E]
 
 
+def is_ok[T](result: Result[T, Any]) -> TypeGuard[Ok[T]]:
+    """Narrow a ``Result`` to :class:`Ok` inside an ``if`` (a type guard).
+
+    The boolean method ``.is_ok()`` does not narrow; this function does, the
+    Python analogue of better-result's ``Result.isOk`` type predicate.
+    """
+
+    return isinstance(result, Ok)
+
+
+def is_err[E](result: Result[Any, E]) -> TypeGuard[Err[E]]:
+    """Narrow a ``Result`` to :class:`Err` inside an ``if`` (a type guard)."""
+
+    return isinstance(result, Err)
+
+
 @overload
-def attempt(fn: Callable[[], _T]) -> Result[_T, Exception]: ...
+def attempt(fn: Callable[[], _T]) -> Result[_T, UnhandledException]: ...
 @overload
 def attempt(
     fn: Callable[[], _T], *, catch: Callable[[Exception], _T2]
@@ -404,12 +473,14 @@ def attempt(
 def attempt(
     fn: Callable[[], _T],
     *,
-    catch: Callable[[Exception], Any] = lambda e: e,
+    catch: Callable[[Exception], Any] = lambda e: UnhandledException(e),
 ) -> Result[_T, Any]:
     """Run ``fn`` and capture its failure as a value.
 
     Only ``Exception`` is captured — ``KeyboardInterrupt`` and
     ``SystemExit`` are bugs/interrupts and must propagate (fail fast).
+    Without a custom ``catch``, the failure is wrapped in
+    :class:`~pyeffect.tagged.UnhandledException` (preserving ``.cause``).
     """
     try:
         return Ok(fn())
@@ -418,7 +489,7 @@ def attempt(
 
 
 @overload
-def guard(fn: Callable[_P, _T]) -> Callable[_P, Result[_T, Exception]]: ...
+def guard(fn: Callable[_P, _T]) -> Callable[_P, Result[_T, UnhandledException]]: ...
 @overload
 def guard(
     fn: Callable[_P, _T],
@@ -428,7 +499,7 @@ def guard(
 def guard(
     fn: Callable[_P, _T],
     *,
-    catch: Callable[[Exception], Any] = lambda e: e,
+    catch: Callable[[Exception], Any] = lambda e: UnhandledException(e),
 ) -> Callable[_P, Result[_T, Any]]:
     """Decorate ``fn`` so it returns a :data:`Result` instead of raising."""
 
@@ -506,6 +577,29 @@ def transpose[T, E](result: Result[Option[T], E]) -> Option[Result[T, E]]:
     if isinstance(opt, Some):
         return Some(cast(Result[T, E], Ok(opt.value)))
     return Nothing()
+
+
+def recover[T, U, E, F](
+    result: Result[T, E], f: Callable[[E], Result[U, F]]
+) -> Result[T | U, F]:
+    """Recover from a failure, possibly widening the success type.
+
+    ``recover`` is :func:`or_else` generalized: the callback may return an
+    ``Ok[U]`` with a *different* success type, so the result's success slot
+    widens to ``T | U``. An ``Ok`` passes through unchanged.
+
+    A method spelling is impossible: Python's invariant generics cannot make
+    ``Ok.recover`` and ``Err.recover`` share one signature, so ``recover`` is
+    a module function like :func:`flatten` and :func:`transpose`.
+    """
+
+    match result:
+        case Ok():
+            # Ok[T] is a member of Ok[T | U] | Err[F]; invariant generics
+            # cannot widen it, so re-assert the union type (see transpose).
+            return cast(Result[T | U, F], result)
+        case Err():
+            return cast(Result[T | U, F], f(result.error))
 
 
 def partition[T, E](results: Iterable[Result[T, E]]) -> tuple[list[T], list[E]]:

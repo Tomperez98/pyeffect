@@ -7,6 +7,7 @@ import pytest
 from pyeffect.effect import Effect, sequence
 from pyeffect.result import Err, Ok, Result, UnwrapError
 from pyeffect.retry import Policy
+from pyeffect.tagged import UnhandledException
 
 
 def test_effect_is_lazy_until_run() -> None:
@@ -148,7 +149,8 @@ def test_attempt_success() -> None:
 def test_attempt_failure() -> None:
     result = Effect.attempt(lambda: 1 / 0).run_result()
     assert isinstance(result, Err)
-    assert isinstance(result.error, ZeroDivisionError)
+    assert isinstance(result.error, UnhandledException)
+    assert isinstance(result.error.cause, ZeroDivisionError)
 
 
 def test_attempt_with_custom_catch() -> None:
@@ -291,3 +293,9 @@ def test_flatten_collapses_nested_effect() -> None:
     assert nested_err.flatten().run_result() == Err("boom")
     outer_err: Effect[Effect[int, str], str] = Effect.failure("outer")
     assert outer_err.flatten().run_result() == Err("outer")
+
+
+def test_recover_widens_effect_success_type() -> None:
+    effect: Effect[int, str] = Effect.failure("boom")
+    recovered = effect.recover(lambda e: Effect.success(len(e)))
+    assert recovered.run_result() == Ok(4)

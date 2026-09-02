@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import pytest
 
+from pyeffect.panic import Panic
 from pyeffect.result import Err, Ok, Result, attempt
 from pyeffect.retry import Policy, retry
 
@@ -91,15 +92,55 @@ def test_composes_with_attempt() -> None:
 
 
 def test_policy_rejects_zero_attempts() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Panic):
         Policy(max_attempts=0)
 
 
 def test_policy_rejects_negative_delay() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Panic):
         Policy(max_attempts=2, delay=-1.0)
 
 
 def test_policy_accepts_valid_values() -> None:
     assert Policy(max_attempts=1).max_attempts == 1
     assert Policy(max_attempts=3, delay=0.5).delay == 0.5
+
+
+def test_dynamic_delay_uses_the_error() -> None:
+    sleeps: list[float] = []
+
+    def op(attempt: int) -> Result[int, str]:
+        return Err("rate-limited") if attempt < 3 else Ok(attempt)
+
+    result = retry(
+        op,
+        Policy(max_attempts=3),
+        sleep=sleeps.append,
+        delay=lambda error, attempt: 1.5 if error == "rate-limited" else 0.0,
+    )
+    assert result == Ok(3)
+    assert sleeps == [1.5, 1.5]
+
+
+def test_dynamic_delay_rejects_backoff_combination() -> None:
+    with pytest.raises(Panic):
+        retry(
+            lambda n: Err("x"),
+            Policy(max_attempts=2, backoff="exponential"),
+            delay=lambda error, attempt: 1.0,
+        )
+
+
+def test_throwing_should_retry_is_a_panic() -> None:
+    def op(attempt: int) -> Result[int, str]:
+        return Err("boom")
+
+    with pytest.raises(Panic) as excinfo:
+        retry(
+            op,
+            Policy(max_attempts=3, delay=0.0),
+            should_retry=lambda error, attempt: (_ for _ in ()).throw(
+                ValueError("nope")
+            ),
+        )
+    assert isinstance(excinfo.value.cause, ValueError)

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from pyeffect.panic import Panic
 from pyeffect.result import Ok, Result
 
 __all__ = ["Backoff", "Policy", "retry"]
@@ -47,15 +48,13 @@ class Policy:
     jitter: float = 0.0
 
     def __post_init__(self) -> None:
-        # Explicit raises, not assert: `python -O` strips asserts, which would
-        # let a broken policy through to a misleading "unreachable" error in
-        # `retry`. A broken policy is a defect and must panic unconditionally.
+        # A broken policy is a defect and must panic unconditionally.
         if self.max_attempts < 1:
-            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+            raise Panic(f"max_attempts must be >= 1, got {self.max_attempts}")
         if self.delay < 0.0:
-            raise ValueError(f"delay must be >= 0, got {self.delay}")
+            raise Panic(f"delay must be >= 0, got {self.delay}")
         if not 0.0 <= self.jitter <= 1.0:
-            raise ValueError(f"jitter must be in [0, 1], got {self.jitter}")
+            raise Panic(f"jitter must be in [0, 1], got {self.jitter}")
 
 
 def _base_delay(retry_number: int, policy: Policy) -> float:
@@ -77,6 +76,7 @@ def retry[T, E](
     *,
     sleep: Callable[[float], None] = time.sleep,
     should_retry: Callable[[E, int], bool] = lambda error, attempt: True,
+    delay: Callable[[E, int], float] | None = None,
     random_float: Callable[[], float] = random.random,
 ) -> Result[T, E]:
     """Run ``operation`` up to ``policy.max_attempts`` times.
@@ -85,23 +85,41 @@ def retry[T, E](
     :data:`Result`. On ``Ok`` it stops immediately; after the final attempt
     it returns the last ``Err`` — a value the caller decides how to handle.
 
-    Between attempts it sleeps the policy's delay (grown by ``backoff`` and
-    shortened by ``jitter``). ``should_retry(error, attempt)`` can veto a
-    retry: when it returns ``False``, the ``Err`` is returned immediately
-    without sleeping or retrying. ``random_float`` supplies the jitter
-    multiplier (default ``random.random``); inject a constant to make tests
-    deterministic. Failure is expected, so it is returned, never raised.
+    ``delay(error, attempt)`` supplies an error-dependent final delay. When
+    provided it overrides the policy's static ``delay``/``backoff``/``jitter``
+    (combining it with ``backoff`` or ``jitter`` is a defect and panics).
+    A throwing ``should_retry`` or ``delay`` callback is a defect and becomes
+    a :class:`Panic`, never a returned ``Err``.
     """
+    if delay is not None and (policy.backoff != "constant" or policy.jitter != 0.0):
+        raise Panic("a dynamic delay cannot be combined with backoff or jitter")
+
     for attempt in range(1, policy.max_attempts + 1):
         result = operation(attempt)
         if isinstance(result, Ok):
             return result
         if attempt == policy.max_attempts:
             return result
-        if not should_retry(result.error, attempt):
-            return result
-        delay = _base_delay(attempt, policy)
-        if policy.jitter:
-            delay *= 1.0 - policy.jitter * random_float()
-        sleep(delay)
-    raise AssertionError("unreachable: Policy.max_attempts >= 1 guarantees a return")
+        try:
+            if not should_retry(result.error, attempt):
+                return result
+        except Exception as exc:
+            raise Panic("should_retry callback raised", cause=exc) from exc
+        try:
+            wait = (
+                delay(result.error, attempt)
+                if delay is not None
+                else _base_delay(attempt, policy) * _jitter(policy, random_float)
+            )
+        except Exception as exc:
+            raise Panic("delay callback raised", cause=exc) from exc
+        sleep(wait)
+    raise Panic("unreachable: Policy.max_attempts >= 1 guarantees a return")
+
+
+def _jitter(policy: Policy, random_float: Callable[[], float]) -> float:
+    """The multiplier ``(1 - jitter * r)`` applied to a static delay."""
+
+    if policy.jitter:
+        return 1.0 - policy.jitter * random_float()
+    return 1.0

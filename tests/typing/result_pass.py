@@ -11,9 +11,13 @@ from pyeffect.result import (
     attempt,
     flatten,
     guard,
+    is_err,
+    is_ok,
+    recover,
     transpose,
     traverse,
 )
+from pyeffect.tagged import UnhandledException
 
 
 def add_one(x: int) -> int:
@@ -52,11 +56,19 @@ def main(n: int, boom: str) -> None:
     assert_type(attempt(lambda: n, catch=lambda e: str(e)), Result[int, str])
 
     # guard: the decorated signature is preserved.
-    assert_type(guard(add_one)(n), Result[int, Exception])
+    assert_type(guard(add_one)(n), Result[int, UnhandledException])
     assert_type(guard(add_one, catch=lambda e: str(e))(n), Result[int, str])
 
     # Pattern matching narrows the union to each variant.
     assert_type(handle(Ok(n)), int)
+
+    # is_ok/is_err: TypeGuard narrowing in an if-statement.
+    def read_value(result: Result[int, str]) -> int:
+        if is_ok(result):
+            return result.value  # narrowed to Ok[int]
+        if is_err(result):
+            return len(result.error)  # narrowed to Err[str]
+        raise AssertionError("unreachable")
 
     # Catamorphism and inspection: both branches in one typed expression.
     assert_type(r.fold(lambda v: v + 1, lambda e: len(e)), int)
@@ -89,6 +101,13 @@ def main(n: int, boom: str) -> None:
     ctx_lazy: Result[int, ErrorContext] = r.with_context(lambda e: f"failed: {e}")
     assert_type(ctx_lazy, Result[int, ErrorContext])
     assert_type(Ok(n).context("while parsing"), Result[int, ErrorContext])
+
+    # recover: widens the success type to T | U.
+    def to_guest(e: str) -> Result[str, str]:
+        return Ok("guest")
+
+    widened: Result[int | str, str] = recover(r, to_guest)
+    assert_type(widened, Result[int | str, str])
 
     # and_/or_: eager keep-other / keep-self combinators.
     and_ok: Result[str, str] = r.and_(Ok("a"))

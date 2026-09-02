@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from pyeffect.panic import Panic
 from pyeffect.tagged import (
     MatchError,
     TaggedError,
+    UnhandledException,
     match_error,
     match_error_partial,
 )
@@ -100,6 +102,23 @@ def test_match_error_partial_handles_known_tag() -> None:
     assert result == 404
 
 
+def test_unhandled_exception_preserves_cause() -> None:
+    cause = ValueError("boom")
+    err = UnhandledException(cause)
+    assert err.tag == "UnhandledException"
+    assert err.cause is cause
+    assert str(err) == "ValueError: boom"
+
+
+def test_unhandled_exception_to_dict() -> None:
+    err = UnhandledException(ValueError("boom"))
+    assert err.to_dict() == {
+        "tag": "UnhandledException",
+        "message": "ValueError: boom",
+        "cause": "ValueError: boom",
+    }
+
+
 def test_public_exports() -> None:
     from pyeffect import MatchError, TaggedError, match_error, match_error_partial
 
@@ -107,3 +126,43 @@ def test_public_exports() -> None:
     assert MatchError is not None
     assert callable(match_error)
     assert callable(match_error_partial)
+
+
+def test_match_error_is_a_panic() -> None:
+    with pytest.raises(Panic) as excinfo:
+        match_error(UserNotFound("u"), {"PermissionDenied": lambda e: 403})
+    assert isinstance(excinfo.value, MatchError)
+    assert excinfo.value.cause is not None
+
+
+def test_tagged_error_match_instance_method() -> None:
+    result = UserNotFound("u").match(
+        {
+            "UserNotFound": lambda e: 404,
+            "PermissionDenied": lambda e: 403,
+        }
+    )
+    assert result == 404
+
+
+def test_tagged_error_match_raises_on_missing_tag() -> None:
+    with pytest.raises(MatchError):
+        UserNotFound("u").match({"PermissionDenied": lambda e: 403})
+
+
+def test_match_error_data_last() -> None:
+    dispatch = match_error(
+        {
+            "UserNotFound": lambda e: 404,
+            "PermissionDenied": lambda e: 403,
+        }
+    )
+    assert dispatch(UserNotFound("u")) == 404
+
+
+def test_match_error_partial_without_fallback_passes_through() -> None:
+    result = match_error_partial(
+        UserNotFound("u"),
+        {"PermissionDenied": lambda e: 403},
+    )
+    assert isinstance(result, UserNotFound)

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
 from pyeffect.do import _ShortCircuit
+from pyeffect.panic import Panic
 
 if TYPE_CHECKING:
     from pyeffect.result import Result
@@ -42,11 +43,13 @@ __all__ = [
 ]
 
 
-class UnwrapNothingError(Exception):
+class UnwrapNothingError(Panic):
     """Raised when ``unwrap()``/``expect()`` is called on ``Nothing``.
 
     Unwrapping an absence is a bug — the caller promised a value. Panic
-    instead of silently returning a wrong value.
+    instead of silently returning a wrong value. A :class:`Panic` subtype,
+    so ``except Panic`` catches it while ``pytest.raises(UnwrapNothingError)``
+    stays precise.
     """
 
     def __init__(self, context: str = "unwrap() on Nothing") -> None:

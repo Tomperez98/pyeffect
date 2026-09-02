@@ -1,0 +1,28 @@
+# pyeffect
+
+> Typed, composable error handling for Python with Result values, tagged
+> errors, and lazy Effect composition. The one rule: bugs panic, expected
+> failures return values.
+
+## Search vocabulary
+
+- `Result`, `Ok`, `Err` — the value-carrying form of expected failure.
+- `attempt`, `guard` — capture exceptions; wrap unknown ones in `UnhandledException`.
+- `map`, `map_err`, `and_then`, `or_else`, `recover`, `fold` — combinators.
+- `Panic`, `panic`, `is_panic` — the unified defect type; `UnwrapError`,
+  `UnwrapNothingError`, `MatchError` are precise subtypes.
+- `TaggedError`, `match_error`, `match_error_partial`, `error.match()` — tagged errors.
+- `do`, `do_effect` — generator-expression do-notation.
+- `Effect` — lazy, re-runnable computation; `run`/`run_result` are the only impure moments.
+- `retry`, `Policy`, `Backoff` — deterministic, injectable retry with dynamic delays.
+- `Codec`, `from_dict`, `ResultSerializationError`, `ResultDeserializationError` — serialization.
+- `Option`, `Some`, `Nothing`, `from_optional` — expected absence.
+
+## Agent checklist
+
+1. Return `Err` for failures the caller can decide on; let `Panic` expose bugs.
+2. Tag domain errors with `TaggedError`; translate unknown exceptions at
+   adapters via `attempt`/`guard`.
+3. Compose with `do` (generator expressions); do not `unwrap()` in normal flow.
+4. Handle the complete error union at a policy boundary with `fold`/`match_error`.
+5. Catch `Panic` only at defect boundaries; never turn it back into an `Err`.

@@ -30,6 +30,7 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, TypeVar, overload
 
+from pyeffect.panic import Panic
 from pyeffect.result import Err, Ok, Result
 
 __all__ = [
@@ -226,12 +227,12 @@ def _positional_arity(f: Callable[..., Any]) -> int:
     parameters = inspect.signature(f).parameters.values()
     for parameter in parameters:
         if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
-            raise TypeError(f"curry requires a fixed arity, got variadic {f!r}")
+            raise Panic(f"curry requires a fixed arity, got variadic {f!r}")
         if (
             parameter.kind is inspect.Parameter.KEYWORD_ONLY
             and parameter.default is inspect.Parameter.empty
         ):
-            raise TypeError(
+            raise Panic(
                 f"curry requires positional parameters only, got required "
                 f"keyword-only {parameter.name!r} in {f!r}"
             )

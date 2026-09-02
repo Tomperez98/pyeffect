@@ -4,6 +4,7 @@ from typing import Any, assert_type
 
 from pyeffect.effect import Effect, sequence
 from pyeffect.result import ErrorContext, Ok, Result
+from pyeffect.tagged import UnhandledException
 
 
 def main(n: int, boom: str) -> None:
@@ -32,8 +33,8 @@ def main(n: int, boom: str) -> None:
     assert_type(sequence([Effect.success(n)]).run_result(), Result[list[int], Any])
 
     # attempt: the exception boundary, deferred. The default error slot is
-    # Exception — concrete, not Any — and catch narrows it exactly.
-    assert_type(Effect.attempt(lambda: n).run_result(), Result[int, Exception])
+    # UnhandledException — a tagged error — and catch narrows it exactly.
+    assert_type(Effect.attempt(lambda: n).run_result(), Result[int, UnhandledException])
     assert_type(Effect.attempt(lambda: n).run(), int)
     assert_type(
         Effect.attempt(lambda: n, catch=lambda e: str(e)).run_result(),
@@ -76,6 +77,13 @@ def main(n: int, boom: str) -> None:
     assert_type(and_effect, Effect[str, str])
     or_effect: Effect[int, str] = failing.or_(Effect.success(n))
     assert_type(or_effect, Effect[int, str])
+
+    # recover: widens the success type to T | U, lazily.
+    def to_guest_effect(e: str) -> Effect[str, str]:
+        return Effect.success("guest")
+
+    recovered: Effect[int | str, str] = failing.recover(to_guest_effect)
+    assert_type(recovered, Effect[int | str, str])
 
     # flatten: collapse a nested effect; the inner effect runs when run.
     nested: Effect[Effect[int, str], str] = Effect(lambda: Ok(failing))

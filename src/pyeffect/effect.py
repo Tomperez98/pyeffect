@@ -43,8 +43,10 @@ from typing import Any, TypeVar, overload
 
 from pyeffect.do import _ShortCircuit
 from pyeffect.result import Err, ErrorContext, Ok, Result, attempt
+from pyeffect.result import recover as recover_result
 from pyeffect.retry import Policy
 from pyeffect.retry import retry as retry_result
+from pyeffect.tagged import UnhandledException
 
 __all__ = ["Effect", "do_effect", "sequence"]
 
@@ -84,7 +86,9 @@ class Effect[T, E]:
 
     @overload
     @staticmethod
-    def attempt(fn: Callable[[], _AttemptT]) -> Effect[_AttemptT, Exception]: ...
+    def attempt(
+        fn: Callable[[], _AttemptT],
+    ) -> Effect[_AttemptT, UnhandledException]: ...
     @overload
     @staticmethod
     def attempt(
@@ -94,7 +98,7 @@ class Effect[T, E]:
     def attempt(
         fn: Callable[[], _AttemptT],
         *,
-        catch: Callable[[Exception], Any] = lambda e: e,
+        catch: Callable[[Exception], Any] = lambda e: UnhandledException(e),
     ) -> Effect[_AttemptT, Any]:
         """An effect that runs ``fn`` and captures its failure as a value.
 
@@ -194,6 +198,19 @@ class Effect[T, E]:
 
         def thunk() -> Result[T, E2]:
             return self._thunk().or_else(lambda error: f(error).run_result())
+
+        return Effect(thunk)
+
+    def recover[U, E2](self, f: Callable[[E], Effect[U, E2]]) -> Effect[T | U, E2]:
+        """Recover from failure, possibly widening the success type (lazy).
+
+        ``recover`` is :meth:`catch` generalized: the callback may succeed
+        with a *different* type ``U``, so the effect's success slot widens to
+        ``T | U``.
+        """
+
+        def thunk() -> Result[T | U, E2]:
+            return recover_result(self._thunk(), lambda error: f(error).run_result())
 
         return Effect(thunk)
 

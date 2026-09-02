@@ -18,9 +18,17 @@ branch); ``.is_`` is a convenience boolean guard that does not narrow.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast, overload
 
-__all__ = ["MatchError", "TaggedError", "match_error", "match_error_partial"]
+from pyeffect.panic import Panic
+
+__all__ = [
+    "MatchError",
+    "TaggedError",
+    "UnhandledException",
+    "match_error",
+    "match_error_partial",
+]
 
 
 class TaggedError(Exception):
@@ -46,6 +54,15 @@ class TaggedError(Exception):
 
         return {"tag": self.tag, "message": str(self)}
 
+    def match[R](self, handlers: Mapping[str, Callable[[Any], R]]) -> R:
+        """Exhaustively dispatch on this error's tag.
+
+        ``error.match(handlers)`` is :func:`match_error` as a method. The
+        handler map must cover the tag; a missing tag raises :class:`MatchError`.
+        """
+
+        return match_error(self, handlers)
+
     @classmethod
     def is_(cls, value: object) -> bool:
         """Whether ``value`` is an instance of this class.
@@ -58,29 +75,73 @@ class TaggedError(Exception):
         return isinstance(value, cls)
 
 
-class MatchError(KeyError):
+class UnhandledException(TaggedError, tag="UnhandledException"):
+    """The default error when a boundary captures an exception without translating it.
+
+    ``attempt``/``guard`` wrap an unknown exception in this tagged error so
+    every ``Err`` stays uniformly matchable by tag. The original exception
+    is preserved as :attr:`cause`.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        self.cause = cause
+        super().__init__(f"{type(cause).__name__}: {cause}")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Include the preserved cause alongside tag and message."""
+
+        return {
+            "tag": self.tag,
+            "message": str(self),
+            "cause": f"{type(self.cause).__name__}: {self.cause}",
+        }
+
+
+class MatchError(Panic):
     """Raised by :func:`match_error` when no handler covers the error's tag.
 
     A tag with no handler is a bug — the match was supposed to be
     exhaustive — so it fails fast instead of returning a wrong value.
+
+    Attributes:
+        missing_tag: The tag that had no handler.
+        error: The error value that was being matched.
     """
 
+    tag: str = "MatchError"
+
     def __init__(self, tag: object, error: object) -> None:
-        self.tag = tag
+        self.missing_tag = tag
         self.error = error
-        super().__init__(f"no handler for tag {tag!r}")
+        super().__init__(f"no handler for tag {tag!r}", cause=error)
 
 
-def match_error[R](error: object, handlers: Mapping[str, Callable[[Any], R]]) -> R:
+@overload
+def match_error[R](error: object, handlers: Mapping[str, Callable[[Any], R]]) -> R: ...
+@overload
+def match_error[R](
+    handlers: Mapping[str, Callable[[Any], R]],
+) -> Callable[[object], R]: ...
+def match_error[R](
+    error: object,
+    handlers: Mapping[str, Callable[[Any], R]] | None = None,
+) -> Any:
     """Dispatch on ``error.tag`` and return the selected handler's result.
 
-    ``handlers`` maps tag strings to single-argument callables. The handler
-    receives the error unchanged. A tag with no handler raises
+    ``match_error(error, handlers)`` is data-first; ``match_error(handlers)``
+    is data-last and returns a curried function. A tag with no handler raises
     :class:`MatchError` (fail fast). Handlers are typed ``Callable[[Any],
     ...]`` — Python cannot narrow a handler's parameter per dict key, so
     narrow with ``isinstance``/``match`` inside the handler when you need a
     specific field.
     """
+
+    if handlers is None:
+        # Data-last form: the first argument is actually the handlers map.
+        def dispatch(value: object) -> R:
+            return match_error(value, cast(Mapping[str, Callable[[Any], R]], error))
+
+        return dispatch
 
     tag = getattr(error, "tag", None)
     handler = handlers.get(tag)
@@ -89,17 +150,30 @@ def match_error[R](error: object, handlers: Mapping[str, Callable[[Any], R]]) ->
     return handler(error)
 
 
+@overload
 def match_error_partial[R](
     error: object,
     handlers: Mapping[str, Callable[[Any], R]],
     fallback: Callable[[Any], R],
-) -> R:
-    """Like :func:`match_error`, but unhandled tags go to ``fallback``.
+) -> R: ...
+@overload
+def match_error_partial[R](
+    error: object,
+    handlers: Mapping[str, Callable[[Any], R]],
+) -> R | Any: ...
+def match_error_partial[R](
+    error: object,
+    handlers: Mapping[str, Callable[[Any], R]],
+    fallback: Callable[[Any], Any] | None = None,
+) -> Any:
+    """Like :func:`match_error`, but unhandled tags do not fail.
 
-    Use this to transform a subset of variants while leaving the rest
-    unchanged or mapped to a default.
+    With a ``fallback``, unhandled tags are passed to it. Without one, the
+    unhandled error passes through unchanged (identity fallback).
     """
 
     tag = getattr(error, "tag", None)
     handler = handlers.get(tag)
-    return handler(error) if handler is not None else fallback(error)
+    if handler is not None:
+        return handler(error)
+    return error if fallback is None else fallback(error)

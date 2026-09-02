@@ -17,6 +17,7 @@ from pyeffect.compose import (
     tap,
     unpack,
 )
+from pyeffect.panic import Panic
 from pyeffect.pipe import pipe
 from pyeffect.result import Err, Ok
 
@@ -153,7 +154,7 @@ def test_curry_zero_arity() -> None:
 
 
 def test_curry_rejects_variadic() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(Panic):
         curry(lambda *args: sum(args))
 
 
@@ -161,7 +162,7 @@ def test_curry_rejects_required_keyword_only() -> None:
     def needs_kw(a: int, *, b: int) -> int:
         return a + b
 
-    with pytest.raises(TypeError):
+    with pytest.raises(Panic):
         curry(needs_kw)  # ty: ignore[no-matching-overload]
 
 

@@ -7,6 +7,7 @@ from collections.abc import Callable
 import pytest
 
 from pyeffect.option import Nothing, Option, Some
+from pyeffect.panic import Panic
 from pyeffect.result import (
     Err,
     ErrorContext,
@@ -16,9 +17,11 @@ from pyeffect.result import (
     attempt,
     flatten,
     guard,
+    recover,
     transpose,
     traverse,
 )
+from pyeffect.tagged import UnhandledException
 
 
 def add_one(x: int) -> int:
@@ -138,7 +141,8 @@ def test_attempt_success() -> None:
 def test_attempt_failure() -> None:
     result = attempt(lambda: 1 / 0)
     assert isinstance(result, Err)
-    assert isinstance(result.error, ZeroDivisionError)
+    assert isinstance(result.error, UnhandledException)
+    assert isinstance(result.error.cause, ZeroDivisionError)
 
 
 def test_attempt_with_custom_catch() -> None:
@@ -164,7 +168,8 @@ def test_guard_decorated_failure() -> None:
 
     result = guard(raiser)(1)
     assert isinstance(result, Err)
-    assert isinstance(result.error, ValueError)
+    assert isinstance(result.error, UnhandledException)
+    assert isinstance(result.error.cause, ValueError)
 
 
 def test_guard_with_custom_catch() -> None:
@@ -355,3 +360,52 @@ def test_unwrap_error_exposes_context() -> None:
     with pytest.raises(UnwrapError) as excinfo:
         Err("boom").expect("must succeed")
     assert excinfo.value.context == "must succeed"
+
+
+def test_unwrap_error_is_a_panic() -> None:
+    with pytest.raises(Panic) as excinfo:
+        Err("boom").unwrap()
+    assert isinstance(excinfo.value, UnwrapError)
+    assert excinfo.value.cause == "boom"
+
+
+def test_recover_widens_success_type() -> None:
+    result: Result[int, str] = Err("boom")
+    recovered = recover(result, lambda e: Ok(len(e)))
+    assert recovered == Ok(4)
+
+
+def test_recover_passes_ok_through() -> None:
+    result: Result[int, str] = Ok(5)
+    recovered = recover(result, lambda e: Ok("guest"))
+    assert recovered == Ok(5)
+
+
+def test_recover_keeps_error_on_err_recovery() -> None:
+    result: Result[int, str] = Err("boom")
+    recovered = recover(result, lambda e: Err(e.upper()))
+    assert recovered == Err("BOOM")
+
+
+def test_status_discriminant() -> None:
+    assert Ok(1).status == "ok"
+    assert Err("boom").status == "error"
+
+
+def test_inspect_both_runs_ok_branch() -> None:
+    seen: list[int] = []
+    result = Ok(2).inspect_both(seen.append, lambda e: None)
+    assert result == Ok(2)
+    assert seen == [2]
+
+
+def test_inspect_both_runs_err_branch() -> None:
+    seen: list[str] = []
+    result = Err("boom").inspect_both(lambda v: None, seen.append)
+    assert result == Err("boom")
+    assert seen == ["boom"]
+
+
+def test_to_dict_envelope() -> None:
+    assert Ok(5).to_dict() == {"status": "ok", "value": 5}
+    assert Err("boom").to_dict() == {"status": "error", "error": "boom"}
