@@ -38,14 +38,15 @@ documented compromise of PEP 695 typing, which has no variance annotations.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Generator, Iterable, Iterator
 from typing import Any, TypeVar, overload
 
+from pyeffect.do import _ShortCircuit
 from pyeffect.result import Err, ErrorContext, Ok, Result, attempt
 from pyeffect.retry import Policy
 from pyeffect.retry import retry as retry_result
 
-__all__ = ["Effect", "sequence"]
+__all__ = ["Effect", "do_effect", "sequence"]
 
 _AttemptT = TypeVar("_AttemptT")
 _AttemptE = TypeVar("_AttemptE")
@@ -256,6 +257,21 @@ class Effect[T, E]:
 
         return self._thunk().unwrap()
 
+    def __iter__(self) -> Iterator[T]:
+        """Run the effect and yield its value (do-notation support).
+
+        Iterating an effect executes its thunk — but only when the
+        enclosing ``do_effect`` thunk runs, so laziness is preserved. A
+        failure raises :class:`_ShortCircuit`.
+        """
+
+        result = self.run_result()
+        match result:
+            case Ok():
+                yield result.value
+            case Err():
+                raise _ShortCircuit(result)
+
 
 def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
     """Run a list of effects in order; fail fast on the first failure.
@@ -275,5 +291,33 @@ def sequence[T, E](effects: Iterable[Effect[T, E]]) -> Effect[list[T], E]:
             else:
                 return result
         return Ok(values)
+
+    return Effect(thunk)
+
+
+def do_effect[T, E](
+    build: Callable[[], Generator[Effect[T, E]]],
+) -> Effect[T, E]:
+    """Compose a sequence of effects lazily into one re-runnable effect.
+
+    ``build`` must return a *fresh* generator expression each call, so the
+    resulting effect is re-runnable: every ``run``/``run_result``
+    re-invokes ``build`` and re-executes each step. Each
+    ``for ... in effect`` clause runs one effect; the first expression is
+    the final effect::
+
+        >>> from pyeffect import Effect
+        >>> from pyeffect.effect import do_effect
+        >>> do_effect(
+        ...     lambda: (Effect.success(x * 2) for x in Effect.success(21))
+        ... ).run()
+        42
+    """
+
+    def thunk() -> Result[T, E]:
+        try:
+            return next(build()).run_result()
+        except _ShortCircuit as short:
+            return short.result
 
     return Effect(thunk)

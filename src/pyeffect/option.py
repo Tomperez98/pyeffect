@@ -22,9 +22,11 @@ bug, not an expected outcome.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
+
+from pyeffect.do import _ShortCircuit
 
 if TYPE_CHECKING:
     from pyeffect.result import Result
@@ -59,6 +61,11 @@ class Some[T]:
     value: T
 
     __match_args__ = ("value",)
+
+    def __iter__(self) -> Iterator[T]:
+        """Yield the value so ``for x in some`` binds ``x`` in do-notation."""
+
+        yield self.value
 
     def map[U](self, f: Callable[[T], U]) -> Option[U]:
         return Some(f(self.value))
@@ -136,6 +143,15 @@ class Nothing:
     ``Option[T]`` for every ``T``. ``unwrap()`` on it is a bug and panics.
     """
 
+    def __iter__(self) -> Iterator[NoReturn]:
+        """Raise :class:`_ShortCircuit` when advanced — never yields."""
+
+        def _iter() -> Iterator[NoReturn]:
+            raise _ShortCircuit(self)
+            yield  # pragma: no cover -- unreachable, makes _iter a generato
+
+        return _iter()
+
     def map[U](self, f: Callable[..., U]) -> Option[U]:
         return self
 
@@ -201,6 +217,9 @@ class Nothing:
         return other if other.is_some() else self
 
 
+# Note: ``Option`` is a typing union (Some[T] | Nothing), not a runtime
+# class. ``isinstance(x, Option)`` raises TypeError — use ``match``,
+# ``is_some()``, or ``isinstance(x, (Some, Nothing))`` instead.
 type Option[T] = Some[T] | Nothing
 
 
@@ -240,7 +259,7 @@ def flatten[T](opt: Option[Option[T]]) -> Option[T]:
 
 
 def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
-    """Swap the nesting: ``Option<Result<T, E>>`` to ``Result<Option<T>, E>>``.
+    """Swap the nesting: ``Option<Result<T, E>>`` to ``Result<Option<T>, E>``.
 
     ``Some(Ok(x))`` is ``Ok(Some(x))``, ``Some(Err(e))`` is ``Err(e)``,
     and ``Nothing()`` is ``Ok(Nothing())``.
@@ -258,8 +277,8 @@ def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
     from pyeffect.result import Err, Ok
 
     if isinstance(opt, Nothing):
-        return Ok[Option[T]](Nothing())
+        return Ok(Nothing())
     inner = opt.value  # Result[T, E]
     if isinstance(inner, Ok):
-        return Ok[Option[T]](Some(inner.value))
+        return Ok(Some(inner.value))
     return Err(inner.error)

@@ -13,7 +13,8 @@ from pyeffect.compose import (
     tap,
     unpack,
 )
-from pyeffect.effect import Effect, sequence
+from pyeffect.do import do
+from pyeffect.effect import Effect, do_effect, sequence
 from pyeffect.option import (
     Nothing,
     Option,
@@ -31,26 +32,33 @@ from pyeffect.result import (
     UnwrapError,
     attempt,
     guard,
+    partition,
     traverse,
 )
-from pyeffect.retry import Policy, retry
+from pyeffect.retry import Backoff, Policy, retry
+from pyeffect.tagged import MatchError, TaggedError, match_error, match_error_partial
 
 __all__ = [
+    "Backoff",
     "Effect",
     "Err",
     "ErrorContext",
+    "MatchError",
     "Nothing",
     "Ok",
     "Option",
     "Policy",
     "Result",
     "Some",
+    "TaggedError",
     "UnwrapError",
     "UnwrapNothingError",
     "attempt",
     "compose",
     "constant",
     "curry",
+    "do",
+    "do_effect",
     "flatten",
     "flip",
     "from_optional",
@@ -59,7 +67,10 @@ __all__ = [
     "lift",
     "lift2",
     "lift3",
+    "match_error",
+    "match_error_partial",
     "partial",
+    "partition",
     "pipe",
     "retry",
     "sequence",

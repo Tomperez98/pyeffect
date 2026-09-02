@@ -74,10 +74,12 @@ print(effect.run())  # {} — the read failed, the fallback ran
 
 | Module | Types |
 |---|---|
-| `pyeffect.result` | `Ok` / `Err` / `Result[T, E]`, `attempt`, `guard`, `traverse`, `flatten`, `transpose`, `ErrorContext` |
+| `pyeffect.result` | `Ok` / `Err` / `Result[T, E]`, `attempt`, `guard`, `traverse`, `partition`, `flatten`, `transpose`, `ErrorContext` |
 | `pyeffect.option` | `Some` / `Nothing` / `Option[T]`, `from_optional`, `flatten`, `transpose` |
-| `pyeffect.effect` | `Effect[T, E]` — a lazy, re-runnable computation; `sequence`, `attempt`, `retry_result` |
-| `pyeffect.retry` | `retry` + `Policy` — deterministic, injectable backoff |
+| `pyeffect.do` | `do` — generator-expression do-notation for `Result`/`Option` |
+| `pyeffect.effect` | `Effect[T, E]` — a lazy, re-runnable computation; `sequence`, `attempt`, `retry_result`, `do_effect` |
+| `pyeffect.retry` | `retry` + `Policy` + `Backoff` — deterministic, injectable backoff (constant/linear/exponential), jitter, and `should_retry` |
+| `pyeffect.tagged` | `TaggedError`, `MatchError`, `match_error`, `match_error_partial` |
 | `pyeffect.pipe` | `pipe(value, f, g, ...)` — left-to-right threading |
 | `pyeffect.compose` | `compose`, `curry`, `lift` / `lift2` / `lift3`, `identity`, `tap`, `flip`, `unpack`, `constant`, `partial` |
 
@@ -89,6 +91,91 @@ underscore because `and`/`or` are Python keywords), plus `Option.xor`.
 `flatten` and `transpose` are module-level functions on `result` and
 `option` (`from pyeffect.result import flatten, transpose`) because Python's
 invariant generics make the equivalent methods untypeable at call sites.
+
+## Do-notation: linear composition
+
+Nested `.and_then(...)` chains become linear with `do` — the generator-
+expression spelling of `Result.gen` / `yield*`. Each `for ... in result`
+clause unwraps a `Result` (or `Option`), the first expression is the final
+value, and an `Err`/`Nothing` short-circuits the whole block:
+
+```python
+from pyeffect import Ok, Err, Result, do
+
+
+def checkout(cart_id: str) -> Result[str, str]:
+    return do(
+        Ok(f"order:{stock}")
+        for cart in load_cart(cart_id)
+        for stock in reserve_stock(cart["items"])
+    )
+```
+
+`do` runs eagerly. `do_effect` composes `Effect`s lazily into one
+re-runnable effect — its argument is a thunk returning a *fresh* generator
+expression, so every `.run()` re-executes the steps:
+
+```python
+from pyeffect import Effect, do_effect
+
+effect = do_effect(
+    lambda: (Effect.success(f"order:{stock}") for stock in Effect.success(2))
+)
+effect.run()  # "order:2" — nothing ran until now
+```
+
+The success type flows through every step precisely. Python's invariant
+generics cannot infer the *error* type from a generator expression, so
+`do` leaves it loose — pin it with an annotation or `map_err`, exactly as
+with `and_then`.
+
+## Tagged errors
+
+Errors are values you can discriminate by a literal `tag` instead of
+string-matching on a message. Subclass `TaggedError` with a `tag`, then
+dispatch with `match_error` (fails fast on an unhandled tag) or
+`match_error_partial` (passes unhandled tags to a fallback):
+
+```python
+from pyeffect import TaggedError, match_error
+
+
+class UserNotFound(TaggedError, tag="UserNotFound"):
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        super().__init__(f"user {user_id} not found")
+
+
+class PermissionDenied(TaggedError, tag="PermissionDenied"):
+    def __init__(self, permission: str) -> None:
+        self.permission = permission
+        super().__init__(f"missing {permission}")
+
+
+def status(error: UserNotFound | PermissionDenied) -> int:
+    return match_error(
+        error,
+        {
+            "UserNotFound": lambda e: 404,
+            "PermissionDenied": lambda e: 403,
+        },
+    )
+```
+
+Narrow to a concrete error with native `isinstance`/`match` — `ty` narrows
+the branch:
+
+```python
+def describe(error: UserNotFound | PermissionDenied) -> str:
+    match error:
+        case UserNotFound(user_id=uid):
+            return f"no user {uid}"
+        case PermissionDenied(permission=perm):
+            return f"missing {perm}"
+```
+
+The tag defaults to the class name when omitted; `tag`, `.is_()`, and
+`to_dict()` are always available.
 
 ## `Effect` is the impurity boundary
 

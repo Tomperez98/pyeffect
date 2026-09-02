@@ -35,11 +35,12 @@ bug, not an expected outcome.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, NoReturn, ParamSpec, TypeVar, overload
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast, overload
 
+from pyeffect.do import _ShortCircuit
 from pyeffect.option import Nothing, Option, Some
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "attempt",
     "flatten",
     "guard",
+    "partition",
     "transpose",
     "traverse",
 ]
@@ -98,6 +100,15 @@ class Ok[T]:
     value: T
 
     __match_args__ = ("value",)
+
+    def __iter__(self) -> Iterator[T]:
+        """Yield the value so ``for x in ok`` binds ``x`` in do-notation.
+
+        ``Ok`` is iterable so ``do(... for x in result)`` can unwrap it;
+        the loop variable's type is ``T``.
+        """
+
+        yield self.value
 
     def map[U, E](self, f: Callable[[T], U]) -> Result[U, E]:
         return Ok(f(self.value))
@@ -242,6 +253,19 @@ class Err[E]:
     error: E
 
     __match_args__ = ("error",)
+
+    def __iter__(self) -> Iterator[NoReturn]:
+        """Raise :class:`_ShortCircuit` when advanced — never yields.
+
+        Makes do-notation short-circuit: iterating an ``Err`` raises the
+        private control-flow signal that :func:`pyeffect.do.do` catches.
+        """
+
+        def _iter() -> Iterator[NoReturn]:
+            raise _ShortCircuit(self)
+            yield  # pragma: no cover -- unreachable, makes _iter a generator
+
+        return _iter()
 
     def map[U, T](self, f: Callable[[T], U]) -> Result[U, E]:
         return Err(self.error)
@@ -474,8 +498,34 @@ def transpose[T, E](result: Result[Option[T], E]) -> Option[Result[T, E]]:
     """
 
     if isinstance(result, Err):
-        return Some[Result[T, E]](result)
+        # ``Err[E]`` is a member of the ``Result[T, E]`` union, but invariant
+        # generics cannot widen it back to the union once ``isinstance`` has
+        # narrowed it — so re-assert the union type for ``Some``'s slot.
+        return Some(cast(Result[T, E], result))
     opt = result.value  # Option[T]
     if isinstance(opt, Some):
-        return Some[Result[T, E]](Ok(opt.value))
+        return Some(cast(Result[T, E], Ok(opt.value)))
     return Nothing()
+
+
+def partition[T, E](results: Iterable[Result[T, E]]) -> tuple[list[T], list[E]]:
+    """Split a sequence of results into its successes and failures.
+
+    Unlike :func:`traverse`, ``partition`` does not short-circuit: every
+    element is visited, successes are collected in order into the first
+    list and failures into the second::
+
+        >>> from pyeffect.result import Ok, Err, partition
+        >>> partition([Ok(1), Err("a"), Ok(2)])
+        ([1, 2], ['a'])
+    """
+
+    values: list[T] = []
+    errors: list[E] = []
+    for result in results:
+        match result:
+            case Ok():
+                values.append(result.value)
+            case Err():
+                errors.append(result.error)
+    return values, errors
