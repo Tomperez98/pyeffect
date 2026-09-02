@@ -1,0 +1,68 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - README.md
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: check the lockfile is up to date
+        run: uv lock --check
+
+  # Single runner and single Python: pyeffect is pure Python with no
+  # platform-specific code, and requires-python >= 3.14 leaves one
+  # interpreter to test. No coverage step — pytest-cov isn't a dependency
+  # and there's no Codecov setup on this repo. The examples and
+  # integration-pg jobs from the reference don't apply here (no examples
+  # dir, no resonate server, no database connector to prove against).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      # setup-python reads .python-version (3.14), so the interpreter and
+      # requires-python stay in sync from one place.
+      - name: set up python
+        uses: actions/setup-python@v5
+
+      - name: install
+        run: uv sync --locked
+
+      - name: check linting
+        run: uv run ruff check
+
+      # The checked surface is `src tests`, matching the README: the
+      # tests/typing/ fixtures are what gate the library's type contracts.
+      - name: check types
+        run: uv run ty check
+
+      - name: run tests
+        run: uv run pytest

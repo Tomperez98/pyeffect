@@ -1,14 +1,16 @@
-"""The docstring examples in the pipe module are part of its contract."""
+"""Docstring examples in every pyeffect module are part of its contract."""
 
 import doctest
+import pkgutil
 from importlib import import_module
 
-# ``import pyeffect.pipe as m`` would bind the re-exported *function*
-# (the __init__ re-export shadows the submodule name) — resolve the module
-# through sys.modules instead.
-PIPE_MODULE = import_module("pyeffect.pipe")
+import pyeffect
 
 
-def test_pipe_module_doctests() -> None:
-    results = doctest.testmod(PIPE_MODULE)
-    assert results.failed == 0, f"{results.failed} doctest(s) failed"
+def test_all_module_doctests() -> None:
+    failed = 0
+    for module_info in pkgutil.iter_modules(pyeffect.__path__):
+        module = import_module(f"pyeffect.{module_info.name}")
+        results = doctest.testmod(module)
+        failed += results.failed
+    assert failed == 0, f"{failed} doctest(s) failed across the package"

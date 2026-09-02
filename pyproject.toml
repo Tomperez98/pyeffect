@@ -1,7 +1,7 @@
 [project]
 name = "pyeffect"
 version = "0.1.0"
-description = "Add your description here"
+description = "A fully typed functional core for Python: Result, Option, Effect, and composition utilities."
 readme = "README.md"
 authors = [
     { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
