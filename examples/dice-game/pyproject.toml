@@ -1,7 +1,7 @@
 [project]
-name = "pyeffect-checkout"
+name = "pyeffect-dice-game"
 version = "0.1.0"
-description = "Runnable checkout pipeline demo: Result/Option/do, retry, Effect, TaggedError, Codec, Panic boundary"
+description = "Runnable Snakes & Ladders simulation: Result/Option boards, lazy Effect dice, retry on cocked rolls, tagged errors, Codec, panic boundary"
 readme = "README.md"
 requires-python = ">=3.12"
 # pyeffect is the only dependency and it has none of its own.

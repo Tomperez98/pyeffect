@@ -15,7 +15,7 @@ from pyeffect.option import (
     from_optional,
     transpose,
 )
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok, Result
 
 
@@ -88,7 +88,7 @@ def test_filter_drops_non_matching() -> None:
 
 
 def test_filter_on_nothing() -> None:
-    assert Nothing().filter(lambda x: True) == Nothing()
+    assert Nothing().filter(lambda _: True) == Nothing()
 
 
 def test_inspect_runs_on_some() -> None:
@@ -175,8 +175,8 @@ def test_flatten() -> None:
 
 
 def test_flatten_rejects_non_options() -> None:
-    with pytest.raises(Panic):
-        flatten(cast(Option[Option[int]], 5))
+    with pytest.raises(PanicError):
+        flatten(cast("Option[Option[int]]", 5))
 
 
 def test_result_ok_err_conversions() -> None:
@@ -213,13 +213,13 @@ def test_transpose_swaps_layers() -> None:
 
 
 def test_transpose_rejects_non_options() -> None:
-    with pytest.raises(Panic):
-        transpose(cast(Option[Result[int, str]], 5))
+    with pytest.raises(PanicError):
+        transpose(cast("Option[Result[int, str]]", 5))
 
 
 def test_transpose_rejects_some_with_non_result_payload() -> None:
-    with pytest.raises(Panic):
-        transpose(cast(Option[Result[int, str]], Some(5)))
+    with pytest.raises(PanicError):
+        transpose(cast("Option[Result[int, str]]", Some(5)))
 
 
 def test_unwrap_nothing_error_exposes_context() -> None:
@@ -229,6 +229,6 @@ def test_unwrap_nothing_error_exposes_context() -> None:
 
 
 def test_unwrap_nothing_error_is_a_panic() -> None:
-    with pytest.raises(Panic) as excinfo:
+    with pytest.raises(PanicError) as excinfo:
         Nothing().unwrap()
     assert isinstance(excinfo.value, UnwrapNothingError)

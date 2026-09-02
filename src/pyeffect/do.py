@@ -21,12 +21,13 @@ variants (``Err``/``Nothing``) raise :class:`_ShortCircuit`, a private
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from pyeffect.option import Option
     from pyeffect.result import Result
 
@@ -74,11 +75,14 @@ def do(gen: Generator[Any, None, Any]) -> Any:
     except _ShortCircuit as short:
         return short.result
     except StopIteration:
-        raise Panic("do: the generator yielded no value") from None
+        msg = "do: the generator yielded no value"
+        raise PanicError(msg) from None
     try:
         next(gen)
     except StopIteration:
         return result
     except _ShortCircuit:
-        raise Panic("do: the generator must yield exactly one value") from None
-    raise Panic("do: the generator must yield exactly one value")
+        msg = "do: the generator must yield exactly one value"
+        raise PanicError(msg) from None
+    msg = "do: the generator must yield exactly one value"
+    raise PanicError(msg)

@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import random
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Ok, Result
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = ["Backoff", "Policy", "retry"]
 
@@ -40,6 +42,7 @@ class Policy:
         backoff: How ``delay`` grows across attempts.
         jitter: Fraction in ``[0, 1]`` by which a delay may be randomly
             shortened (0 = none, 1 = fully randomized).
+
     """
 
     max_attempts: int
@@ -50,15 +53,17 @@ class Policy:
     def __post_init__(self) -> None:
         # A broken policy is a defect and must panic unconditionally.
         if self.max_attempts < 1:
-            raise Panic(f"max_attempts must be >= 1, got {self.max_attempts}")
+            msg = f"max_attempts must be >= 1, got {self.max_attempts}"
+            raise PanicError(msg)
         if self.delay < 0.0:
-            raise Panic(f"delay must be >= 0, got {self.delay}")
+            msg = f"delay must be >= 0, got {self.delay}"
+            raise PanicError(msg)
         if not 0.0 <= self.jitter <= 1.0:
-            raise Panic(f"jitter must be in [0, 1], got {self.jitter}")
+            msg = f"jitter must be in [0, 1], got {self.jitter}"
+            raise PanicError(msg)
 
 
 def _base_delay(retry_number: int, policy: Policy) -> float:
-    """The delay before retry number ``retry_number`` (1-based), before jitter."""
     match policy.backoff:
         case "constant":
             return policy.delay
@@ -75,7 +80,7 @@ def retry[T, E](
     policy: Policy,
     *,
     sleep: Callable[[float], None] = time.sleep,
-    should_retry: Callable[[E, int], bool] = lambda error, attempt: True,
+    should_retry: Callable[[E, int], bool] = lambda _error, _attempt: True,
     delay: Callable[[E, int], float] | None = None,
     random_float: Callable[[], float] = random.random,
 ) -> Result[T, E]:
@@ -89,10 +94,11 @@ def retry[T, E](
     provided it overrides the policy's static ``delay``/``backoff``/``jitter``
     (combining it with ``backoff`` or ``jitter`` is a defect and panics).
     A throwing ``should_retry`` or ``delay`` callback is a defect and becomes
-    a :class:`Panic`, never a returned ``Err``.
+    a :class:`PanicError`, never a returned ``Err``.
     """
     if delay is not None and (policy.backoff != "constant" or policy.jitter != 0.0):
-        raise Panic("a dynamic delay cannot be combined with backoff or jitter")
+        msg = "a dynamic delay cannot be combined with backoff or jitter"
+        raise PanicError(msg)
 
     for attempt in range(1, policy.max_attempts + 1):
         result = operation(attempt)
@@ -104,7 +110,8 @@ def retry[T, E](
             if not should_retry(result.error, attempt):
                 return result
         except Exception as exc:
-            raise Panic("should_retry callback raised", cause=exc) from exc
+            msg = "should_retry callback raised"
+            raise PanicError(msg, cause=exc) from exc
         try:
             wait = (
                 delay(result.error, attempt)
@@ -112,14 +119,14 @@ def retry[T, E](
                 else _base_delay(attempt, policy) * _jitter(policy, random_float)
             )
         except Exception as exc:
-            raise Panic("delay callback raised", cause=exc) from exc
+            msg = "delay callback raised"
+            raise PanicError(msg, cause=exc) from exc
         sleep(wait)
-    raise Panic("unreachable: Policy.max_attempts >= 1 guarantees a return")
+    msg = "unreachable: Policy.max_attempts >= 1 guarantees a return"
+    raise PanicError(msg)
 
 
 def _jitter(policy: Policy, random_float: Callable[[], float]) -> float:
-    """The multiplier ``(1 - jitter * r)`` applied to a static delay."""
-
     if policy.jitter:
         return 1.0 - policy.jitter * random_float()
     return 1.0

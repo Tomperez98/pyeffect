@@ -1,5 +1,7 @@
 """Typing fixture: do/do_effect pin the success type through every step."""
 
+from __future__ import annotations
+
 from typing import assert_type
 
 from pyeffect import Effect, Err, Nothing, Ok, Option, Result, Some, do, do_effect

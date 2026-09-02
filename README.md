@@ -30,11 +30,11 @@ defers side effects until you run them.
 
 > **Bugs panic, expected failures return values.**
 
-- **Panic** when the program reaches a state that should be impossible —
+- **Raise `PanicError`** when the program reaches a state that should be impossible —
   `unwrap()` on `Err`/`Nothing`, a broken retry `Policy`, a non-exhaustive
   `match_error`, an over-arity `curry`. Every defect raises the same type —
-  `Panic` (with `UnwrapError` / `UnwrapNothingError` / `MatchError` as
-  precise subtypes) — so a defect boundary catches `Panic` and reports the
+  `PanicError` (with `UnwrapError` / `UnwrapNothingError` / `MatchError` as
+  precise subtypes) — so a defect boundary catches `PanicError` and reports the
   bug. The damage stops at the exact line.
 - **Return a value** when failure is expected — network errors, bad input,
   absence. The caller decides what to do with it.
@@ -42,7 +42,7 @@ defers side effects until you run them.
 ## Why pyeffect
 
 - **One rule, two outcomes.** `Err` is a value the caller handles; a broken
-  invariant raises a single `Panic` type — no `except Exception` guessing.
+  invariant raises a single `PanicError` type — no `except Exception` guessing.
 - **Zero dependencies, sync-first.** `Result`/`Option` are plain unions,
   `Effect` is a thunk. No higher-kinded-type machinery; async stays out
   until you need it.
@@ -100,8 +100,8 @@ print(effect.run())  # {} — the read failed, the fallback ran
 | `pyeffect.do` | `do` — generator-expression do-notation for `Result`/`Option` |
 | `pyeffect.effect` | `Effect[T, E]` — a lazy, re-runnable computation; `sequence`, `do_effect` |
 | `pyeffect.retry` | `retry` + `Policy` + `Backoff` — deterministic, injectable backoff (constant/linear/exponential), jitter, dynamic `delay`, and `should_retry` |
-| `pyeffect.tagged` | `TaggedError`, `UnhandledException`, `MatchError`, `match_error`, `match_error_partial`, `error.match()` |
-| `pyeffect.panic` | `Panic`, `panic`, `is_panic` — the unified defect type |
+| `pyeffect.tagged` | `TaggedError`, `UnhandledError`, `MatchError`, `match_error`, `match_error_partial`, `error.match()` |
+| `pyeffect.panic` | `PanicError`, `panic`, `is_panic` — the unified defect type |
 | `pyeffect.codec` | `Codec`, `from_dict`, `ResultSerializationError`, `ResultDeserializationError` |
 | `pyeffect.pipe` | `pipe(value, f, g, ...)` — left-to-right threading |
 | `pyeffect.compose` | `compose`, `curry`, `lift` / `lift2` / `lift3`, `identity`, `tap`, `flip`, `unpack`, `constant`, `partial` |
@@ -167,19 +167,19 @@ dispatch with `match_error` (fails fast on an unhandled tag) or
 from pyeffect import TaggedError, match_error
 
 
-class UserNotFound(TaggedError, tag="UserNotFound"):
+class UserNotFoundError(TaggedError, tag="UserNotFound"):
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         super().__init__(f"user {user_id} not found")
 
 
-class PermissionDenied(TaggedError, tag="PermissionDenied"):
+class PermissionDeniedError(TaggedError, tag="PermissionDenied"):
     def __init__(self, permission: str) -> None:
         self.permission = permission
         super().__init__(f"missing {permission}")
 
 
-def status(error: UserNotFound | PermissionDenied) -> int:
+def status(error: UserNotFoundError | PermissionDeniedError) -> int:
     return match_error(
         error,
         {
@@ -193,17 +193,17 @@ Narrow to a concrete error with native `isinstance`/`match` — `ty` narrows
 the branch:
 
 ```python
-def describe(error: UserNotFound | PermissionDenied) -> str:
+def describe(error: UserNotFoundError | PermissionDeniedError) -> str:
     match error:
-        case UserNotFound(user_id=uid):
+        case UserNotFoundError(user_id=uid):
             return f"no user {uid}"
-        case PermissionDenied(permission=perm):
+        case PermissionDeniedError(permission=perm):
             return f"missing {perm}"
 ```
 
 The tag defaults to the class name when omitted; `tag`, `.is_()`,
 `to_dict()`, and `error.match(...)` (the instance spelling of `match_error`)
-are always available. Unknown exceptions are wrapped in `UnhandledException`
+are always available. Unknown exceptions are wrapped in `UnhandledError`
 by `attempt`/`guard` unless a `catch` translator is supplied.
 
 ## Recovery and serialization
@@ -229,7 +229,7 @@ assert from_dict({"status": "error", "error": "boom"}) == Err("boom")
 ```
 
 A pluggable `Codec` (`pyeffect.codec`) validates payloads in both
-directions with safe (`Result`-returning) and unsafe (`Panic`-raising)
+directions with safe (`Result`-returning) and unsafe (`PanicError`-raising)
 variants — see its module docstring.
 
 ## `Effect` is the impurity boundary
@@ -271,7 +271,11 @@ checked-out source and shares the repo's lockfile and virtualenv:
 ```bash
 uv run python examples/checkout/main.py   # a checkout pipeline: Result/Option/do,
                                           # Effect, retry, tagged errors, Codec,
-                                          # and the Panic defect boundary
+                                          # and the PanicError defect boundary
+uv run python examples/dice-game/main.py  # a Snakes & Ladders simulation: Result
+                                          # board validation, dice as lazy Effect,
+                                          # retry on cocked rolls, partition,
+                                          # Codec round trip, panic boundary
 ```
 
 See [`examples/`](examples/) for the full list and how to add an example.

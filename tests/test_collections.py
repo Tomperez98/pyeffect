@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok, Result, partition
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 def test_partition_splits_ok_and_err() -> None:
@@ -35,7 +38,7 @@ def test_partition_empty() -> None:
 
 
 def test_partition_accepts_a_generator() -> None:
-    def results():  # generator: yields Ok/Err
+    def results() -> Generator:  # generator: yields Ok/Err
         yield Ok(1)
         yield Err("boom")
         yield Ok(2)
@@ -48,8 +51,8 @@ def test_partition_accepts_a_generator() -> None:
 def test_partition_rejects_non_result_elements() -> None:
     # A non-Result element is a caller bug: panic instead of silently
     # dropping it from both lists.
-    with pytest.raises(Panic):
-        partition([Ok(1), cast(Result[int, str], 5)])
+    with pytest.raises(PanicError):
+        partition([Ok(1), cast("Result[int, str]", 5)])
 
 
 def test_public_export() -> None:

@@ -19,7 +19,7 @@ from pyeffect.compose import (
     tap,
     unpack,
 )
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.pipe import pipe
 from pyeffect.result import Err, Ok, Result
 
@@ -155,7 +155,7 @@ def test_curry_zero_arity() -> None:
 
 
 def test_curry_rejects_variadic() -> None:
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         curry(lambda *args: sum(args))
 
 
@@ -163,7 +163,7 @@ def test_curry_rejects_required_keyword_only() -> None:
     def needs_kw(a: int, *, b: int) -> int:
         return a + b
 
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         curry(needs_kw)  # ty: ignore[no-matching-overload]
 
 
@@ -190,22 +190,22 @@ def test_lift3_applies_ternary() -> None:
 
 
 def test_lift_rejects_non_results() -> None:
-    with pytest.raises(Panic):
-        lift(add_one)(cast(Result[int, str], 5))
+    with pytest.raises(PanicError):
+        lift(add_one)(cast("Result[int, str]", 5))
 
 
 def test_lift2_rejects_non_results() -> None:
     add2 = lift2(lambda a, b: a + b)
-    with pytest.raises(Panic):
-        add2(cast(Result[int, str], 5), Ok(1))
-    with pytest.raises(Panic):
-        add2(Ok(1), cast(Result[int, str], 5))
+    with pytest.raises(PanicError):
+        add2(cast("Result[int, str]", 5), Ok(1))
+    with pytest.raises(PanicError):
+        add2(Ok(1), cast("Result[int, str]", 5))
 
 
 def test_lift3_rejects_non_results() -> None:
     add3 = lift3(lambda a, b, c: a + b + c)
-    with pytest.raises(Panic):
-        add3(cast(Result[int, str], 5), Ok(1), Ok(2))
+    with pytest.raises(PanicError):
+        add3(cast("Result[int, str]", 5), Ok(1), Ok(2))
 
 
 def test_partial_is_functools_partial() -> None:

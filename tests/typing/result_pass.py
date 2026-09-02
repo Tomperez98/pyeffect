@@ -1,5 +1,7 @@
 """Typing fixture: valid Result/attempt/guard calls pinned with assert_type."""
 
+from __future__ import annotations
+
 from typing import Literal, assert_type
 
 from pyeffect.option import Nothing, Option, Some
@@ -17,7 +19,7 @@ from pyeffect.result import (
     transpose,
     traverse,
 )
-from pyeffect.tagged import UnhandledException
+from pyeffect.tagged import UnhandledError
 
 
 def add_one(x: int) -> int:
@@ -45,19 +47,19 @@ def main(n: int, boom: str) -> None:
     r: Result[int, str] = Ok(n)
     assert_type(r.map(to_str).unwrap(), str)
     assert_type(r.and_then(lambda x: Ok(x + 1)).unwrap(), int)
-    assert_type(r.unwrap_or_else(lambda e: len(e)), int)
+    assert_type(r.unwrap_or_else(len), int)
 
     # Err branch: recovery types are exact.
     assert_type(Err(boom).unwrap_or(0), Literal[0])
-    assert_type(Err(boom).unwrap_or_else(lambda e: len(e)), int)
+    assert_type(Err(boom).unwrap_or_else(len), int)
 
     # attempt: failure becomes a value, typed exactly.
     assert_type(attempt(lambda: n).unwrap(), int)
-    assert_type(attempt(lambda: n, catch=lambda e: str(e)), Result[int, str])
+    assert_type(attempt(lambda: n, catch=str), Result[int, str])
 
     # guard: the decorated signature is preserved.
-    assert_type(guard(add_one)(n), Result[int, UnhandledException])
-    assert_type(guard(add_one, catch=lambda e: str(e))(n), Result[int, str])
+    assert_type(guard(add_one)(n), Result[int, UnhandledError])
+    assert_type(guard(add_one, catch=str)(n), Result[int, str])
 
     # Pattern matching narrows the union to each variant.
     assert_type(handle(Ok(n)), int)
@@ -68,18 +70,19 @@ def main(n: int, boom: str) -> None:
             return result.value  # narrowed to Ok[int]
         if is_err(result):
             return len(result.error)  # narrowed to Err[str]
-        raise AssertionError("unreachable")
+        msg = "unreachable"
+        raise AssertionError(msg)
 
     # Catamorphism and inspection: both branches in one typed expression.
-    assert_type(r.fold(lambda v: v + 1, lambda e: len(e)), int)
+    assert_type(r.fold(lambda v: v + 1, len), int)
     assert_type(r.contains(1), bool)
     assert_type(r.map_or(0, lambda v: v + 1), int)
-    assert_type(r.map_or_else(lambda e: len(e), lambda v: v + 1), int)
+    assert_type(r.map_or_else(len, lambda v: v + 1), int)
 
     # inspect/inspect_err keep the exact Result type (via binding context).
-    inspected: Result[int, str] = r.inspect(lambda v: None)
+    inspected: Result[int, str] = r.inspect(lambda _: None)
     assert_type(inspected, Result[int, str])
-    inspected_err: Result[int, str] = r.inspect_err(lambda e: None)
+    inspected_err: Result[int, str] = r.inspect_err(lambda _: None)
     assert_type(inspected_err, Result[int, str])
 
     # Applicative zip/map2 pair two Results; the first error wins.

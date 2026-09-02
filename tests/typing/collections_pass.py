@@ -1,5 +1,7 @@
 """Typing fixture: partition returns typed (values, errors) lists."""
 
+from __future__ import annotations
+
 from typing import assert_type
 
 from pyeffect.result import Err, Ok, Result, partition

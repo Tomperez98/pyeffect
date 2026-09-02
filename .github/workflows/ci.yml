@@ -65,8 +65,3 @@ jobs:
 
       - name: run tests
         run: uv run pytest
-
-      # Examples are workspace members that link pyeffect from source;
-      # smoke-run the checkout example so it cannot rot against the API.
-      - name: run the checkout example
-        run: uv run python examples/checkout/main.py

@@ -4,6 +4,8 @@ The intentional error is suppressed for repo-wide checks; ty flags the
 ignore as unused if the diagnostic ever changes or disappears.
 """
 
+from __future__ import annotations
+
 from pyeffect.compose import compose, curry
 
 

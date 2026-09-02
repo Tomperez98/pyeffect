@@ -22,14 +22,15 @@ bug, not an expected outcome.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
 from pyeffect.do import _ShortCircuit
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from pyeffect.result import Result
 
 __all__ = [
@@ -43,12 +44,12 @@ __all__ = [
 ]
 
 
-class UnwrapNothingError(Panic):
+class UnwrapNothingError(PanicError):
     """Raised when ``unwrap()``/``expect()`` is called on ``Nothing``.
 
-    Unwrapping an absence is a bug — the caller promised a value. Panic
-    instead of silently returning a wrong value. A :class:`Panic` subtype,
-    so ``except Panic`` catches it while ``pytest.raises(UnwrapNothingError)``
+    Unwrapping an absence is a bug — the caller promised a value. PanicError
+    instead of silently returning a wrong value. A :class:`PanicError` subtype,
+    so ``except PanicError`` catches it while ``pytest.raises(UnwrapNothingError)``
     stays precise.
     """
 
@@ -67,7 +68,6 @@ class Some[T]:
 
     def __iter__(self) -> Iterator[T]:
         """Yield the value so ``for x in some`` binds ``x`` in do-notation."""
-
         yield self.value
 
     def map[U](self, f: Callable[[T], U]) -> Option[U]:
@@ -78,7 +78,6 @@ class Some[T]:
 
     def and_[U](self, other: Option[U]) -> Option[U]:
         """Return ``other``, discarding this value (the eager ``and``)."""
-
         return other
 
     def or_else(self, f: Callable[[], Option[T]]) -> Option[T]:
@@ -86,7 +85,6 @@ class Some[T]:
 
     def or_(self, other: Option[T]) -> Option[T]:
         """Return ``self`` unchanged (the eager ``or``)."""
-
         return self
 
     def filter(self, f: Callable[[T], bool]) -> Option[T]:
@@ -134,7 +132,6 @@ class Some[T]:
 
     def xor(self, other: Option[T]) -> Option[T]:
         """Return ``Some`` if exactly one side is present, else ``Nothing``."""
-
         return Nothing() if other.is_some() else self
 
 
@@ -163,7 +160,6 @@ class Nothing:
 
     def and_[U](self, other: Option[U]) -> Option[U]:
         """``Nothing`` short-circuits: return ``self`` unchanged."""
-
         return self
 
     def or_else[T](self, f: Callable[[], Option[T]]) -> Option[T]:
@@ -171,7 +167,6 @@ class Nothing:
 
     def or_[T](self, other: Option[T]) -> Option[T]:
         """Return ``other`` (the eager ``or``)."""
-
         return other
 
     def filter[T](self, f: Callable[..., bool]) -> Option[T]:
@@ -181,7 +176,7 @@ class Nothing:
         return self
 
     def unwrap(self) -> NoReturn:
-        raise UnwrapNothingError()
+        raise UnwrapNothingError
 
     def expect(self, message: str) -> NoReturn:
         raise UnwrapNothingError(message)
@@ -216,7 +211,6 @@ class Nothing:
 
     def xor[T](self, other: Option[T]) -> Option[T]:
         """Return ``other`` if present, else ``self`` (which is ``Nothing``)."""
-
         return other if other.is_some() else self
 
 
@@ -238,7 +232,6 @@ def from_optional[T](value: T | None) -> Option[T]:
         >>> from_optional(None)
         Nothing()
     """
-
     return Some(value) if value is not None else Nothing()
 
 
@@ -253,14 +246,14 @@ def flatten[T](opt: Option[Option[T]]) -> Option[T]:
     >>> flatten(Nothing())
     Nothing()
     """
-
     match opt:
         case Some(inner):
             return inner
         case Nothing():
             return Nothing()
         case _:
-            raise Panic(f"flatten expected an Option, got {type(opt).__name__}")
+            msg = f"flatten expected an Option, got {type(opt).__name__}"
+            raise PanicError(msg)
 
 
 def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
@@ -278,7 +271,6 @@ def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
     >>> transpose(Nothing())
     Ok(value=Nothing())
     """
-
     from pyeffect.result import Err, Ok
 
     if isinstance(opt, Nothing):
@@ -289,7 +281,7 @@ def transpose[T, E](opt: Option[Result[T, E]]) -> Result[Option[T], E]:
             return Ok(Some(inner.value))
         if isinstance(inner, Err):
             return Err(inner.error)
-        raise Panic(
-            f"transpose expected a Some to carry a Result, got {type(inner).__name__}"
-        )
-    raise Panic(f"transpose expected an Option, got {type(opt).__name__}")
+        msg = f"transpose expected a Some to carry a Result, got {type(inner).__name__}"
+        raise PanicError(msg)
+    msg = f"transpose expected an Option, got {type(opt).__name__}"
+    raise PanicError(msg)

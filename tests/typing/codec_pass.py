@@ -1,5 +1,7 @@
 """Typing fixture: Codec/from_dict pinned with assert_type."""
 
+from __future__ import annotations
+
 from typing import Any, assert_type
 
 from pyeffect.codec import (
@@ -23,10 +25,10 @@ def _make_codec(
 
 def main(n: int, boom: str) -> None:
     codec = _make_codec(
-        lambda x: str(x),
+        str,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
 
     # serialize returns a Result over the wire envelope.

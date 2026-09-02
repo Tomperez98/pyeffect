@@ -7,10 +7,10 @@ from typing import cast
 import pytest
 
 from pyeffect.effect import Effect, sequence
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok, Result, UnwrapError
 from pyeffect.retry import Policy
-from pyeffect.tagged import UnhandledException
+from pyeffect.tagged import UnhandledError
 
 
 def test_effect_is_lazy_until_run() -> None:
@@ -72,7 +72,7 @@ def test_catch_recovers() -> None:
 
 
 def test_catch_passes_success_through() -> None:
-    assert Effect.success(5).catch(lambda e: Effect.failure(e)).run() == 5
+    assert Effect.success(5).catch(Effect.failure).run() == 5
 
 
 def test_map_err() -> None:
@@ -142,8 +142,8 @@ def test_sequence_materializes_generators() -> None:
 
 
 def test_sequence_rejects_non_result_thunks() -> None:
-    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
-    with pytest.raises(Panic):
+    garbage: Effect[int, str] = Effect(lambda: cast("Result[int, str]", 5))
+    with pytest.raises(PanicError):
         sequence([Effect.success(1), garbage]).run_result()
 
 
@@ -158,12 +158,12 @@ def test_attempt_success() -> None:
 def test_attempt_failure() -> None:
     result = Effect.attempt(lambda: 1 / 0).run_result()
     assert isinstance(result, Err)
-    assert isinstance(result.error, UnhandledException)
+    assert isinstance(result.error, UnhandledError)
     assert isinstance(result.error.cause, ZeroDivisionError)
 
 
 def test_attempt_with_custom_catch() -> None:
-    result = Effect.attempt(lambda: 1 / 0, catch=lambda e: str(e)).run_result()
+    result = Effect.attempt(lambda: 1 / 0, catch=str).run_result()
     assert result == Err("division by zero")
 
 
@@ -235,10 +235,10 @@ def test_zip_runs_both_thunks_in_order() -> None:
 
 def test_zip_rejects_non_result_thunks() -> None:
     good: Effect[int, str] = Effect.success(1)
-    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
-    with pytest.raises(Panic):
+    garbage: Effect[int, str] = Effect(lambda: cast("Result[int, str]", 5))
+    with pytest.raises(PanicError):
         garbage.zip(good).run_result()
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         good.zip(garbage).run_result()
 
 
@@ -258,10 +258,10 @@ def test_map2_fails_on_second_error() -> None:
 
 def test_map2_rejects_non_result_thunks() -> None:
     good: Effect[int, str] = Effect.success(1)
-    garbage: Effect[int, str] = Effect(lambda: cast(Result[int, str], 5))
-    with pytest.raises(Panic):
+    garbage: Effect[int, str] = Effect(lambda: cast("Result[int, str]", 5))
+    with pytest.raises(PanicError):
         garbage.map2(good, lambda a, b: a + b).run_result()
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         good.map2(garbage, lambda a, b: a + b).run_result()
 
 
@@ -304,7 +304,7 @@ def test_map_or_on_success_and_failure() -> None:
 
 def test_map_or_else_on_failure() -> None:
     effect: Effect[int, str] = Effect.failure("boom")
-    assert effect.map_or_else(lambda e: len(e), lambda x: x + 1).run() == 4
+    assert effect.map_or_else(len, lambda x: x + 1).run() == 4
 
 
 def test_and_returns_other_effect_on_success() -> None:
@@ -332,9 +332,9 @@ def test_flatten_collapses_nested_effect() -> None:
 
 def test_flatten_rejects_non_result_thunks() -> None:
     garbage: Effect[Effect[int, str], str] = Effect(
-        lambda: cast(Result[Effect[int, str], str], 5)
+        lambda: cast("Result[Effect[int, str], str]", 5)
     )
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         garbage.flatten().run_result()
 
 

@@ -4,6 +4,8 @@ Must type-check clean under `ty check`. Each assert_type pins the exact
 inferred type at that arity so the typing contract cannot drift silently.
 """
 
+from __future__ import annotations
+
 from functools import partial
 from typing import Literal, assert_type
 

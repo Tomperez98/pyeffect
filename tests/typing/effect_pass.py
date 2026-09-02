@@ -1,10 +1,12 @@
 """Typing fixture: valid Effect calls pinned with assert_type."""
 
+from __future__ import annotations
+
 from typing import Any, assert_type
 
 from pyeffect.effect import Effect, sequence
 from pyeffect.result import ErrorContext, Ok, Result
-from pyeffect.tagged import UnhandledException
+from pyeffect.tagged import UnhandledError
 
 
 def main(n: int, boom: str) -> None:
@@ -33,11 +35,11 @@ def main(n: int, boom: str) -> None:
     assert_type(sequence([Effect.success(n)]).run_result(), Result[list[int], Any])
 
     # attempt: the exception boundary, deferred. The default error slot is
-    # UnhandledException — a tagged error — and catch narrows it exactly.
-    assert_type(Effect.attempt(lambda: n).run_result(), Result[int, UnhandledException])
+    # UnhandledError — a tagged error — and catch narrows it exactly.
+    assert_type(Effect.attempt(lambda: n).run_result(), Result[int, UnhandledError])
     assert_type(Effect.attempt(lambda: n).run(), int)
     assert_type(
-        Effect.attempt(lambda: n, catch=lambda e: str(e)).run_result(),
+        Effect.attempt(lambda: n, catch=str).run_result(),
         Result[int, str],
     )
 
@@ -61,16 +63,14 @@ def main(n: int, boom: str) -> None:
     assert_type(anchored, Effect[int, str])
 
     # inspect/inspect_err: lazy tap, preserving both slots.
-    insp: Effect[int, str] = failing.inspect(lambda v: None)
+    insp: Effect[int, str] = failing.inspect(lambda _: None)
     assert_type(insp, Effect[int, str])
-    insp_err: Effect[int, str] = failing.inspect_err(lambda e: None)
+    insp_err: Effect[int, str] = failing.inspect_err(lambda _: None)
     assert_type(insp_err, Effect[int, str])
 
     # map_or/map_or_else: lazy default on failure.
     assert_type(failing.map_or(0, lambda v: v + 1), Effect[int, str])
-    assert_type(
-        failing.map_or_else(lambda e: len(e), lambda v: v + 1), Effect[int, str]
-    )
+    assert_type(failing.map_or_else(len, lambda v: v + 1), Effect[int, str])
 
     # and_/or_: eager keep-other / keep-self combinators.
     and_effect: Effect[str, str] = failing.and_(Effect.success("a"))

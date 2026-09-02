@@ -10,7 +10,7 @@ from pyeffect.codec import (
     ResultSerializationError,
     from_dict,
 )
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok
 
 
@@ -46,10 +46,10 @@ def test_from_dict_rejects_unknown_status() -> None:
 
 def test_codec_roundtrip() -> None:
     codec = _make_codec(
-        lambda n: str(n),
+        str,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
     encoded = codec.serialize(Ok(5))
     assert encoded == Ok({"status": "ok", "value": "5"})
@@ -61,10 +61,10 @@ def test_codec_deserialize_rejects_missing_payload_keys() -> None:
     # A status without its payload key is a malformed envelope — an
     # expected wire failure that must not reach the payload decoders.
     codec = _make_codec(
-        lambda n: str(n),
+        str,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
     for malformed in ({"status": "ok"}, {"status": "error"}):
         result = codec.deserialize(malformed)
@@ -74,13 +74,14 @@ def test_codec_deserialize_rejects_missing_payload_keys() -> None:
 
 def test_codec_serialize_catches_encoder_defects() -> None:
     def boom(x: int) -> object:
-        raise ValueError("bad")
+        msg = "bad"
+        raise ValueError(msg)
 
     codec = _make_codec(
         boom,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
     result = codec.serialize(Ok(5))
     assert isinstance(result, Err)
@@ -89,66 +90,69 @@ def test_codec_serialize_catches_encoder_defects() -> None:
 
 def test_codec_serialize_unsafe_panics() -> None:
     def boom(x: int) -> object:
-        raise ValueError("bad")
+        msg = "bad"
+        raise ValueError(msg)
 
     codec = _make_codec(
         boom,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         codec.serialize_unsafe(Ok(5))
 
 
 def test_codec_serialize_propagates_encoder_panics() -> None:
-    # An encoder raising a Panic is a defect, not a wire failure: it must
+    # An encoder raising a PanicError is a defect, not a wire failure: it must
     # propagate unchanged instead of becoming a ResultSerializationError.
     def boom(x: object) -> object:
-        raise Panic("encoder defect")
+        msg = "encoder defect"
+        raise PanicError(msg)
 
     codec = _make_codec(
         boom,
         boom,
-        lambda w: Ok(w),
-        lambda w: Ok(w),
+        Ok,
+        Ok,
     )
-    with pytest.raises(Panic, match="encoder defect"):
+    with pytest.raises(PanicError, match="encoder defect"):
         codec.serialize(Ok(5))
-    with pytest.raises(Panic, match="encoder defect"):
+    with pytest.raises(PanicError, match="encoder defect"):
         codec.serialize(Err("boom"))
 
 
 def test_codec_serialize_unsafe_propagates_encoder_panics() -> None:
     def boom(x: object) -> object:
-        raise Panic("encoder defect")
+        msg = "encoder defect"
+        raise PanicError(msg)
 
     codec = _make_codec(
         boom,
         lambda e: e,
-        lambda w: Ok(w),
-        lambda w: Ok(w),
+        Ok,
+        Ok,
     )
-    with pytest.raises(Panic, match="encoder defect"):
+    with pytest.raises(PanicError, match="encoder defect"):
         codec.serialize_unsafe(Ok(5))
 
 
 def test_codec_deserialize_unsafe_keeps_domain_err() -> None:
     codec = _make_codec(
-        lambda n: str(n),
+        str,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
     assert codec.deserialize_unsafe({"status": "error", "error": "boom"}) == Err("boom")
 
 
 def test_codec_deserialize_unsafe_panics_on_bad_envelope() -> None:
     codec = _make_codec(
-        lambda n: str(n),
+        str,
         lambda e: e,
         lambda w: Ok(int(str(w))),
-        lambda w: Ok(w),
+        Ok,
     )
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         codec.deserialize_unsafe("not-a-dict")

@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
 from pyeffect.result import Err, Ok, Result, attempt
 from pyeffect.retry import Policy, retry
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def failing_until(
     attempts_list: list[int], succeed_at: int
 ) -> Callable[[int], Result[int, str]]:
-    """An operation that fails until the ``succeed_at``-th attempt."""
 
     def operation(attempt: int) -> Result[int, str]:
         attempts_list.append(attempt)
@@ -83,21 +85,22 @@ def test_composes_with_attempt() -> None:
     def flaky() -> int:
         attempts.append(1)
         if len(attempts) < 2:
-            raise ValueError("not yet")
+            msg = "not yet"
+            raise ValueError(msg)
         return 42
 
-    result = retry(lambda n: attempt(flaky), Policy(max_attempts=3))
+    result = retry(lambda _: attempt(flaky), Policy(max_attempts=3))
     assert result == Ok(42)
     assert attempts == [1, 1]
 
 
 def test_policy_rejects_zero_attempts() -> None:
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         Policy(max_attempts=0)
 
 
 def test_policy_rejects_negative_delay() -> None:
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         Policy(max_attempts=2, delay=-1.0)
 
 
@@ -116,18 +119,18 @@ def test_dynamic_delay_uses_the_error() -> None:
         op,
         Policy(max_attempts=3),
         sleep=sleeps.append,
-        delay=lambda error, attempt: 1.5 if error == "rate-limited" else 0.0,
+        delay=lambda error, _: 1.5 if error == "rate-limited" else 0.0,
     )
     assert result == Ok(3)
     assert sleeps == [1.5, 1.5]
 
 
 def test_dynamic_delay_rejects_backoff_combination() -> None:
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         retry(
-            lambda n: Err("x"),
+            lambda _: Err("x"),
             Policy(max_attempts=2, backoff="exponential"),
-            delay=lambda error, attempt: 1.0,
+            delay=lambda _error, _attempt: 1.0,
         )
 
 
@@ -135,11 +138,11 @@ def test_throwing_should_retry_is_a_panic() -> None:
     def op(attempt: int) -> Result[int, str]:
         return Err("boom")
 
-    with pytest.raises(Panic) as excinfo:
+    with pytest.raises(PanicError) as excinfo:
         retry(
             op,
             Policy(max_attempts=3, delay=0.0),
-            should_retry=lambda error, attempt: (_ for _ in ()).throw(
+            should_retry=lambda _error, _attempt: (_ for _ in ()).throw(
                 ValueError("nope")
             ),
         )

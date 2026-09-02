@@ -1,5 +1,7 @@
 """Typing fixture: valid compose/combinator calls pinned with assert_type."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from typing import assert_type
 

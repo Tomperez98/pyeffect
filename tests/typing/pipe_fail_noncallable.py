@@ -1,5 +1,7 @@
 """Typing fixture: a step that is not callable. Must fail `ty`."""
 
+from __future__ import annotations
+
 from pyeffect import pipe
 
 

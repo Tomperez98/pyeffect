@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from pyeffect.panic import Panic
-from pyeffect.retry import Backoff, Policy, _base_delay
+from pyeffect.panic import PanicError
+from pyeffect.result import Err, Ok, Result
+from pyeffect.retry import Backoff, Policy, _base_delay, retry
 
 
 def test_policy_defaults_are_backward_compatible() -> None:
@@ -15,9 +16,9 @@ def test_policy_defaults_are_backward_compatible() -> None:
 
 
 def test_policy_rejects_out_of_range_jitter() -> None:
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         Policy(max_attempts=3, jitter=1.5)
-    with pytest.raises(Panic):
+    with pytest.raises(PanicError):
         Policy(max_attempts=3, jitter=-0.1)
 
 
@@ -38,10 +39,6 @@ def test_exponential_backoff() -> None:
     assert _base_delay(1, policy) == 2.0
     assert _base_delay(2, policy) == 4.0
     assert _base_delay(3, policy) == 8.0
-
-
-from pyeffect.result import Err, Ok, Result
-from pyeffect.retry import retry
 
 
 def test_retry_exponential_backoff_delays() -> None:
@@ -70,7 +67,7 @@ def test_should_retry_false_stops_immediately() -> None:
         op,
         Policy(max_attempts=5, delay=0.1),
         sleep=sleeps.append,
-        should_retry=lambda error, attempt: False,
+        should_retry=lambda _error, _attempt: False,
     )
     assert result == Err("boom")
     assert sleeps == []
@@ -88,7 +85,7 @@ def test_should_retry_selective() -> None:
     result = retry(
         op,
         Policy(max_attempts=3, delay=0.0),
-        should_retry=lambda error, attempt: error == "transient",
+        should_retry=lambda error, _: error == "transient",
     )
     assert result == Ok(2)
     assert attempts == [1, 2]
@@ -110,8 +107,7 @@ def test_jitter_shortens_delay() -> None:
 
 
 def test_public_export() -> None:
-    from pyeffect import Backoff as PublicBackoff
-    from pyeffect import Policy as PublicPolicy
+    from pyeffect import Backoff as PublicBackoff, Policy as PublicPolicy
 
     assert PublicBackoff is Backoff
     assert PublicPolicy is Policy

@@ -4,6 +4,8 @@ The intentional errors are suppressed for repo-wide checks; ty flags the
 ignores as unused if the diagnostics ever change or disappear.
 """
 
+from __future__ import annotations
+
 from pyeffect import Ok, do
 
 

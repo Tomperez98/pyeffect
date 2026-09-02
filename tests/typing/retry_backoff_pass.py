@@ -1,5 +1,7 @@
 """Typing fixture: retry preserves Result[T, E] through backoff options."""
 
+from __future__ import annotations
+
 from typing import assert_type
 
 from pyeffect.result import Err, Ok, Result
@@ -20,6 +22,6 @@ def main() -> None:
     selective = retry(
         op,
         Policy(max_attempts=3),
-        should_retry=lambda error, attempt: error == "flaky",
+        should_retry=lambda error, _: error == "flaky",
     )
     assert_type(selective, Result[int, str])

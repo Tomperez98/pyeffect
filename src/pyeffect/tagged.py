@@ -17,15 +17,17 @@ branch); ``.is_`` is a convenience boolean guard that does not narrow.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
-from pyeffect.panic import Panic
+from pyeffect.panic import PanicError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
 __all__ = [
     "MatchError",
     "TaggedError",
-    "UnhandledException",
+    "UnhandledError",
     "match_error",
     "match_error_partial",
 ]
@@ -35,9 +37,9 @@ class TaggedError(Exception):
     """Base class for errors carrying a literal ``tag``.
 
     Subclasses declare the tag with a keyword argument
-    (``class UserNotFound(TaggedError, tag="UserNotFound")``); when omitted
-    it defaults to the class name. The tag lives on the class, so every
-    instance of a subclass shares it; the base class itself carries
+    (``class UserNotFoundError(TaggedError, tag="UserNotFound")``); when
+    omitted it defaults to the class name. The tag lives on the class, so
+    every instance of a subclass shares it; the base class itself carries
     ``"TaggedError"`` so direct instances are usable.
     """
 
@@ -51,8 +53,7 @@ class TaggedError(Exception):
         super().__init__(message)
 
     def to_dict(self) -> dict[str, Any]:
-        """A minimal serializable form; subclasses override to add payload."""
-
+        """Return a minimal serializable form; subclasses override to add payload."""
         return {"tag": self.tag, "message": str(self)}
 
     def match[R](self, handlers: Mapping[str, Callable[[Any], R]]) -> R:
@@ -61,7 +62,6 @@ class TaggedError(Exception):
         ``error.match(handlers)`` is :func:`match_error` as a method. The
         handler map must cover the tag; a missing tag raises :class:`MatchError`.
         """
-
         return match_error(self, handlers)
 
     @classmethod
@@ -72,11 +72,10 @@ class TaggedError(Exception):
         ``isinstance(value, cls)`` or a ``match`` statement — ``ty``
         narrows those, but cannot narrow through a plain ``bool`` method.
         """
-
         return isinstance(value, cls)
 
 
-class UnhandledException(TaggedError, tag="UnhandledException"):
+class UnhandledError(TaggedError, tag="UnhandledException"):
     """The default error when a boundary captures an exception without translating it.
 
     ``attempt``/``guard`` wrap an unknown exception in this tagged error so
@@ -90,7 +89,6 @@ class UnhandledException(TaggedError, tag="UnhandledException"):
 
     def to_dict(self) -> dict[str, Any]:
         """Include the preserved cause alongside tag and message."""
-
         return {
             "tag": self.tag,
             "message": str(self),
@@ -98,7 +96,7 @@ class UnhandledException(TaggedError, tag="UnhandledException"):
         }
 
 
-class MatchError(Panic):
+class MatchError(PanicError):
     """Raised by :func:`match_error` when no handler covers the error's tag.
 
     A tag with no handler is a bug — the match was supposed to be
@@ -107,6 +105,7 @@ class MatchError(Panic):
     Attributes:
         missing_tag: The tag that had no handler.
         error: The error value that was being matched.
+
     """
 
     tag: str = "MatchError"
@@ -136,11 +135,10 @@ def match_error[R](
     narrow with ``isinstance``/``match`` inside the handler when you need a
     specific field.
     """
-
     if handlers is None:
         # Data-last form: the first argument is actually the handlers map.
         def dispatch(value: object) -> R:
-            return match_error(value, cast(Mapping[str, Callable[[Any], R]], error))
+            return match_error(value, cast("Mapping[str, Callable[[Any], R]]", error))
 
         return dispatch
 
@@ -172,7 +170,6 @@ def match_error_partial[R](
     With a ``fallback``, unhandled tags are passed to it. Without one, the
     unhandled error passes through unchanged (identity fallback).
     """
-
     tag = getattr(error, "tag", None)
     handler = handlers.get(tag)
     if handler is not None:

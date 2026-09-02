@@ -7,12 +7,15 @@ crash (TypeError), never a silently wrong result.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from functools import partial
+from typing import TYPE_CHECKING
 
 import pytest
 
 from pyeffect import pipe
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def add_one(x: int) -> int:
@@ -44,8 +47,6 @@ class Counter:
 
 
 def record(label: str) -> Callable[[int], int]:
-    """A step that appends its label to a shared list, then passes through."""
-
     def step(x: int) -> int:
         calls.append(label)
         return x
@@ -155,7 +156,7 @@ def test_step_exception_propagates_unchanged() -> None:
     def failing(_: int) -> int:
         raise marker
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match="boom") as excinfo:
         pipe(1, add_one, failing, double)
     assert excinfo.value is marker
 
@@ -165,7 +166,8 @@ def test_later_steps_do_not_run_after_a_step_fails() -> None:
 
     def failing(_: int) -> int:
         calls.append("failing")
-        raise RuntimeError("boom")
+        msg = "boom"
+        raise RuntimeError(msg)
 
     with pytest.raises(RuntimeError):
         pipe(0, record("a"), failing, record("b"))

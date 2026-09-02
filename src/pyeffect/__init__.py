@@ -1,5 +1,7 @@
 """pyeffect: a fully typed functional core for Python."""
 
+from __future__ import annotations
+
 from pyeffect.codec import (
     Codec,
     ResultDeserializationError,
@@ -29,7 +31,7 @@ from pyeffect.option import (
     flatten,
     from_optional,
 )
-from pyeffect.panic import Panic, is_panic, panic
+from pyeffect.panic import PanicError, is_panic, panic
 from pyeffect.pipe import pipe
 from pyeffect.result import (
     Err,
@@ -49,7 +51,7 @@ from pyeffect.retry import Backoff, Policy, retry
 from pyeffect.tagged import (
     MatchError,
     TaggedError,
-    UnhandledException,
+    UnhandledError,
     match_error,
     match_error_partial,
 )
@@ -64,14 +66,14 @@ __all__ = [
     "Nothing",
     "Ok",
     "Option",
-    "Panic",
+    "PanicError",
     "Policy",
     "Result",
     "ResultDeserializationError",
     "ResultSerializationError",
     "Some",
     "TaggedError",
-    "UnhandledException",
+    "UnhandledError",
     "UnwrapError",
     "UnwrapNothingError",
     "attempt",
