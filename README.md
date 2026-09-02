@@ -9,7 +9,9 @@ serialization built in.
 ```python
 from pyeffect import Err, Ok, Result, attempt
 
-result: Result[int, str] = attempt(lambda: int("42"), catch=lambda e: str(e)).map(lambda n: n * 2)
+result: Result[int, str] = attempt(lambda: int("42"), catch=lambda e: str(e)).map(
+    lambda n: n * 2
+)
 match result:
     case Ok(value):
         print(value)  # 84
@@ -67,7 +69,9 @@ Paste this and it runs — expected output is in the comments:
 from pyeffect import Effect, Err, Ok, Result, attempt, from_optional
 
 # Expected failure is a value the caller handles.
-result: Result[int, str] = attempt(lambda: int("42"), catch=lambda e: str(e)).map(lambda n: n * 2)
+result: Result[int, str] = attempt(lambda: int("42"), catch=lambda e: str(e)).map(
+    lambda n: n * 2
+)
 match result:
     case Ok(value):
         print(value)  # 84
